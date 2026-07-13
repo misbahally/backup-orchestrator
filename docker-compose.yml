@@ -1,100 +1,70 @@
-version: "3.8"
-
 services:
-  # ── Backup Orchestrator ────────────────────────────────────────────────────
-  backup-orchestrator:
-    build: .
-    image: backup-orchestrator:latest
-    container_name: backup-orchestrator
-    restart: unless-stopped
+  postgres:
+    image: postgres:16-alpine
     environment:
-      # Source AWS
-      AWS_REGION: ${AWS_REGION}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
-
-      # Destination (S3-compatible)
-      DEST_PROVIDER: ${DEST_PROVIDER}
-      DEST_ENDPOINT: ${DEST_ENDPOINT}
-      DEST_REGION: ${DEST_REGION}
-      DEST_BUCKET: ${DEST_BUCKET}
-      DEST_ACCESS_KEY: ${DEST_ACCESS_KEY}
-      DEST_SECRET_KEY: ${DEST_SECRET_KEY}
-
-      # Source enablement
-      ENABLE_EFS: ${ENABLE_EFS:-false}
-      EFS_FS_IDS: ${EFS_FS_IDS:-}
-      DATA_SYNC_TASK_ARN: ${DATA_SYNC_TASK_ARN:-}
-
-      ENABLE_S3: ${ENABLE_S3:-false}
-      S3_BUCKETS: ${S3_BUCKETS:-}
-      S3_REPLICATION_ROLE_ARN: ${S3_REPLICATION_ROLE_ARN:-}
-
-      ENABLE_EBS: ${ENABLE_EBS:-false}
-      EBS_VOLUME_IDS: ${EBS_VOLUME_IDS:-}
-      EBS_SNAP_PREFIX: ${EBS_SNAP_PREFIX:-Backup}
-
-      ENABLE_RDS: ${ENABLE_RDS:-false}
-      RDS_IDENTIFIERS: ${RDS_IDENTIFIERS:-}
-      RDS_KMS_KEY_ID: ${RDS_KMS_KEY_ID:-}
-
-      # Retention & scheduling
-      RETENTION_DAYS: ${RETENTION_DAYS:-30}
-      SCHEDULE: ${SCHEDULE:-0 2 * * *}
-      METRICS_PORT: "9090"
-      RCLONE_BW_LIMIT: ${RCLONE_BW_LIMIT:-100M}
-    volumes:
-      # Mount AWS credentials and rclone config from host
-      - ${AWS_CREDENTIALS_DIR:-~/.aws}:/root/.aws:ro
-      - ${RCLONE_CONFIG_DIR:-~/.config/rclone}:/root/.config/rclone:ro
+      POSTGRES_DB: ${POSTGRES_DB:-backup_control}
+      POSTGRES_USER: ${POSTGRES_USER:-backup}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-backup}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-backup} -d ${POSTGRES_DB:-backup_control}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     ports:
-      - "9090:9090"  # Prometheus metrics
-    networks:
-      - backup-net
-
-  # ── Prometheus ─────────────────────────────────────────────────────────────
-  prometheus:
-    image: prom/prometheus:v2.48.0
-    container_name: prometheus
-    restart: unless-stopped
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=30d
-      - --web.enable-lifecycle
+      - "5432:5432"
     volumes:
-      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    ports:
-      - "9091:9090"
-    networks:
-      - backup-net
+      - pgdata:/var/lib/postgresql/data
 
-  # ── Grafana ─────────────────────────────────────────────────────────────────
-  grafana:
-    image: grafana/grafana:10.2
-    container_name: grafana
-    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: ./apps/api
+    env_file:
+      - .env
     environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_ALERTING_ENABLED: "true"
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://backup:backup@postgres:5432/backup_control}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      API_HOST: ${API_HOST:-0.0.0.0}
+      API_PORT: ${API_PORT:-8000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
     ports:
-      - "3000:3000"
-    networks:
-      - backup-net
+      - "8000:8000"
+    restart: on-failure
     depends_on:
-      - prometheus
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  worker:
+    build:
+      context: ./apps/worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://backup:backup@postgres:5432/backup_control}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  web:
+    image: nginx:alpine
+    environment:
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "8080:80"
+    volumes:
+      - ./apps/web:/usr/share/nginx/html:ro
+    depends_on:
+      - api
 
 volumes:
-  prometheus-data:
-  grafana-data:
-
-networks:
-  backup-net:
-    name: backup-monitoring
+  pgdata:

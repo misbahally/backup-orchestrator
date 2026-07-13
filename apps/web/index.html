@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Backup Control Plane</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"></script>
+  </head>
+  <body>
+    <header>
+      <h1>Backup Control Plane</h1>
+      <p>Configure sources, destinations, and visualize topology.</p>
+    </header>
+
+    <main>
+      <section class="panel">
+        <h2>Add Destination</h2>
+        <form id="destination-form">
+          <input name="name" placeholder="Name" required />
+          <input name="provider" placeholder="Provider" value="s3-compatible" required />
+          <input name="endpoint" placeholder="Endpoint" required />
+          <input name="bucket" placeholder="Bucket" required />
+          <input name="region" placeholder="Region" value="us-east-1" required />
+          <input name="secret_ref" placeholder="Secret Ref" required />
+          <button type="submit">Save Destination</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Add Source</h2>
+        <form id="source-form">
+          <input name="name" placeholder="Name" required />
+          <select name="source_type" required>
+            <option value="s3">s3</option>
+            <option value="efs">efs</option>
+            <option value="ebs">ebs</option>
+            <option value="rds">rds</option>
+            <option value="other">other</option>
+          </select>
+          <textarea name="settings" placeholder='Settings JSON, e.g. {"bucket":"prod"}'></textarea>
+          <button type="submit">Save Source</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <h2>Create Binding</h2>
+        <form id="binding-form">
+          <select name="source_id" id="source-select" required></select>
+          <select name="destination_id" id="destination-select" required></select>
+          <input name="schedule_cron" value="0 2 * * *" required />
+          <textarea name="policy" placeholder='Policy JSON, e.g. {"retention_days":30}'></textarea>
+          <button type="submit">Create Binding</button>
+        </form>
+      </section>
+
+      <section class="panel full">
+        <h2>Topology</h2>
+        <div id="topology" class="mermaid">graph LR; A[No Data] --> B[Add source and destination]</div>
+      </section>
+
+      <section class="panel full">
+        <h2>Recent Runs</h2>
+        <button id="refresh-runs">Refresh Runs</button>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Binding</th>
+              <th>Status</th>
+              <th>Bytes</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody id="runs-body"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
