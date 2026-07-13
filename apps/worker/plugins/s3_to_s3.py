@@ -1,0 +1,148 @@
+import json
+import os
+from typing import Any
+
+import boto3
+from botocore.exceptions import ClientError
+
+
+def _load_secret(secret_ref: str) -> dict[str, str]:
+    """
+    Resolve credentials from secret reference.
+
+    Supported references:
+    - env:MY_SECRET_ENV (env var contains JSON or ACCESS:SECRET)
+    - MY_SECRET_ENV (same as above)
+    - ACCESS:SECRET (inline, local/dev use only)
+    """
+    if not secret_ref:
+        return {}
+
+    ref = secret_ref.strip()
+
+    if ref.startswith("env:"):
+        raw = os.environ.get(ref[4:], "")
+    else:
+        raw = os.environ.get(ref, "") if ref in os.environ else ref
+
+    if not raw:
+        return {}
+
+    raw = raw.strip()
+
+    if raw.startswith("{"):
+        parsed = json.loads(raw)
+        return {
+            "aws_access_key_id": parsed.get("aws_access_key_id") or parsed.get("access_key") or "",
+            "aws_secret_access_key": parsed.get("aws_secret_access_key") or parsed.get("secret_key") or "",
+            "aws_session_token": parsed.get("aws_session_token") or parsed.get("session_token") or "",
+        }
+
+    if ":" in raw:
+        access, secret = raw.split(":", 1)
+        return {
+            "aws_access_key_id": access,
+            "aws_secret_access_key": secret,
+            "aws_session_token": "",
+        }
+
+    return {}
+
+
+def _make_s3_client(region: str, endpoint: str, creds: dict[str, str]) -> Any:
+    kwargs: dict[str, Any] = {
+        "service_name": "s3",
+        "region_name": region or "us-east-1",
+    }
+
+    if endpoint:
+        kwargs["endpoint_url"] = endpoint
+
+    if creds.get("aws_access_key_id") and creds.get("aws_secret_access_key"):
+        kwargs["aws_access_key_id"] = creds["aws_access_key_id"]
+        kwargs["aws_secret_access_key"] = creds["aws_secret_access_key"]
+    if creds.get("aws_session_token"):
+        kwargs["aws_session_token"] = creds["aws_session_token"]
+
+    return boto3.client(**kwargs)
+
+
+def _dest_key_for(source_key: str, source_prefix: str, dest_prefix: str) -> str:
+    if source_prefix:
+        rel = source_key[len(source_prefix):].lstrip("/")
+    else:
+        rel = source_key
+    return "/".join(part for part in (dest_prefix, rel) if part)
+
+
+def _exists_with_same_size(s3_client: Any, bucket: str, key: str, size: int) -> bool:
+    try:
+        obj = s3_client.head_object(Bucket=bucket, Key=key)
+        return int(obj.get("ContentLength", -1)) == int(size)
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in ("404", "NoSuchKey", "NotFound"):
+            return False
+        raise
+
+
+def run_s3_to_s3(source: Any, destination: Any, binding: Any) -> dict[str, int]:
+    """Copy objects from source S3 bucket to destination S3-compatible bucket."""
+    source_settings = source.settings or {}
+    policy = binding.policy or {}
+
+    source_bucket = source_settings.get("bucket", "").strip()
+    if not source_bucket:
+        raise ValueError("S3 source requires settings.bucket")
+
+    source_prefix = str(source_settings.get("prefix", "")).strip().strip("/")
+    dest_prefix = str(policy.get("dest_prefix", "")).strip().strip("/")
+
+    src_region = source_settings.get("region", "us-east-1")
+    src_endpoint = source_settings.get("endpoint", "")
+    src_secret_ref = source_settings.get("secret_ref", "")
+    src_creds = _load_secret(src_secret_ref)
+
+    dst_region = destination.region or "us-east-1"
+    dst_endpoint = destination.endpoint or ""
+    dst_creds = _load_secret(destination.secret_ref)
+
+    src = _make_s3_client(src_region, src_endpoint, src_creds)
+    dst = _make_s3_client(dst_region, dst_endpoint, dst_creds)
+
+    src_prefix_for_list = f"{source_prefix}/" if source_prefix else ""
+
+    scanned = 0
+    copied = 0
+    skipped = 0
+    transferred_bytes = 0
+
+    paginator = src.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=source_bucket, Prefix=src_prefix_for_list):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            size = int(obj.get("Size", 0))
+            scanned += 1
+
+            target_key = _dest_key_for(key, source_prefix, dest_prefix)
+
+            if _exists_with_same_size(dst, destination.bucket, target_key, size):
+                skipped += 1
+                continue
+
+            response = src.get_object(Bucket=source_bucket, Key=key)
+            body = response["Body"]
+            try:
+                dst.upload_fileobj(body, destination.bucket, target_key)
+            finally:
+                body.close()
+
+            copied += 1
+            transferred_bytes += size
+
+    return {
+        "scanned_objects": scanned,
+        "copied_objects": copied,
+        "skipped_objects": skipped,
+        "transferred_bytes": transferred_bytes,
+    }
