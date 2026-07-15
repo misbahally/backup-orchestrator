@@ -1,5 +1,10 @@
 from datetime import datetime
+import json
+import os
+from typing import Any
 
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from redis import Redis
@@ -38,6 +43,146 @@ def startup() -> None:
 def queue() -> Queue:
     redis_conn = Redis.from_url(settings.redis_url)
     return Queue("backup-runs", connection=redis_conn)
+
+
+def _load_text_secret(secret_ref: str) -> str:
+    if not secret_ref:
+        return ""
+
+    ref = secret_ref.strip()
+    if ref.startswith("env:"):
+        return os.environ.get(ref[4:], "").strip()
+
+    if ref in os.environ:
+        return os.environ.get(ref, "").strip()
+
+    return ref
+
+
+def _load_secret(secret_ref: str) -> dict[str, str]:
+    raw = _load_text_secret(secret_ref)
+    if not raw:
+        return {}
+
+    raw = raw.strip()
+    if raw.startswith("{"):
+        parsed = json.loads(raw)
+        return {
+            "aws_access_key_id": parsed.get("aws_access_key_id") or parsed.get("access_key") or "",
+            "aws_secret_access_key": parsed.get("aws_secret_access_key") or parsed.get("secret_key") or "",
+            "aws_session_token": parsed.get("aws_session_token") or parsed.get("session_token") or "",
+        }
+
+    if ":" in raw:
+        access, secret = raw.split(":", 1)
+        return {
+            "aws_access_key_id": access,
+            "aws_secret_access_key": secret,
+            "aws_session_token": "",
+        }
+
+    return {}
+
+
+def _make_s3_client(region: str, endpoint: str, creds: dict[str, str]) -> Any:
+    kwargs: dict[str, Any] = {
+        "service_name": "s3",
+        "region_name": region or "us-east-1",
+    }
+
+    if endpoint:
+        kwargs["endpoint_url"] = endpoint
+
+    if creds.get("aws_access_key_id") and creds.get("aws_secret_access_key"):
+        kwargs["aws_access_key_id"] = creds["aws_access_key_id"]
+        kwargs["aws_secret_access_key"] = creds["aws_secret_access_key"]
+    if creds.get("aws_session_token"):
+        kwargs["aws_session_token"] = creds["aws_session_token"]
+
+    return boto3.client(**kwargs)
+
+
+def _encryption_mode(config: dict[str, Any]) -> str:
+    return str((config or {}).get("mode", "")).upper()
+
+
+def _validate_sse_config(name: str, config: dict[str, Any]) -> None:
+    mode = _encryption_mode(config)
+    if not mode:
+        return
+
+    if mode in {"SSE-S3", "SSE_S3", "AES256"}:
+        return
+
+    if mode in {"SSE-KMS", "SSE_KMS", "AWS:KMS", "AWS-KMS"}:
+        if not config.get("kms_key_id") and not config.get("kms_key_arn"):
+            raise HTTPException(status_code=400, detail=f"{name} encryption requires kms_key_id or kms_key_arn")
+        return
+
+    if mode in {"SSE-C", "SSE_C", "CUSTOMER", "AES256-C"}:
+        if not (config.get("customer_key") or config.get("customer_key_ref") or config.get("customer_key_secret_ref")):
+            raise HTTPException(status_code=400, detail=f"{name} SSE-C requires customer_key or customer_key_ref")
+        return
+
+    raise HTTPException(status_code=400, detail=f"{name} has unsupported encryption mode: {config.get('mode')}")
+
+
+def _source_encryption(source: Source) -> dict[str, Any]:
+    settings = source.settings or {}
+    return settings.get("encryption") or settings.get("sse") or {}
+
+
+def _destination_encryption(binding: Binding, destination: Destination) -> dict[str, Any]:
+    policy = binding.policy or {}
+    return policy.get("encryption") or policy.get("destination_encryption") or {}
+
+
+def _validate_source_connection(source: Source) -> dict[str, Any]:
+    if source.source_type.value != "s3":
+        return {"ok": True, "message": f"No connection test implemented for {source.source_type.value}"}
+
+    settings = source.settings or {}
+    bucket = str(settings.get("bucket", "")).strip()
+    if not bucket:
+        raise HTTPException(status_code=400, detail="S3 source requires settings.bucket")
+
+    _validate_sse_config("source", _source_encryption(source))
+
+    client = _make_s3_client(
+        settings.get("region", "us-east-1"),
+        settings.get("endpoint", ""),
+        _load_secret(str(settings.get("secret_ref", ""))),
+    )
+
+    try:
+        client.head_bucket(Bucket=bucket)
+    except NoCredentialsError:
+        raise HTTPException(status_code=400, detail="source credentials could not be resolved")
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        raise HTTPException(status_code=400, detail=f"source validation failed: {code or str(exc)}")
+
+    return {"ok": True, "message": f"Source bucket {bucket} is reachable"}
+
+
+def _validate_destination_connection(destination: Destination, binding: Binding | None = None) -> dict[str, Any]:
+    _validate_sse_config("destination", _destination_encryption(binding, destination) if binding else {})
+
+    client = _make_s3_client(
+        destination.region,
+        destination.endpoint,
+        _load_secret(destination.secret_ref),
+    )
+
+    try:
+        client.head_bucket(Bucket=destination.bucket)
+    except NoCredentialsError:
+        raise HTTPException(status_code=400, detail="destination credentials could not be resolved")
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        raise HTTPException(status_code=400, detail=f"destination validation failed: {code or str(exc)}")
+
+    return {"ok": True, "message": f"Destination bucket {destination.bucket} is reachable"}
 
 
 @app.get("/health")
@@ -92,6 +237,79 @@ def create_binding(payload: BindingCreate, db: Session = Depends(get_db)) -> Bin
 @app.get("/bindings", response_model=list[BindingRead])
 def list_bindings(db: Session = Depends(get_db)) -> list[Binding]:
     return db.query(Binding).order_by(Binding.id.desc()).all()
+
+
+@app.get("/validate/source/{source_id}")
+def validate_source(source_id: int, db: Session = Depends(get_db)) -> dict:
+    source = db.get(Source, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    return _validate_source_connection(source)
+
+
+@app.get("/validate/destination/{destination_id}")
+def validate_destination(destination_id: int, db: Session = Depends(get_db)) -> dict:
+    destination = db.get(Destination, destination_id)
+    if destination is None:
+        raise HTTPException(status_code=404, detail="destination not found")
+    return _validate_destination_connection(destination)
+
+
+@app.get("/validate/binding/{binding_id}")
+def validate_binding(binding_id: int, db: Session = Depends(get_db)) -> dict:
+    binding = db.get(Binding, binding_id)
+    if binding is None:
+        raise HTTPException(status_code=404, detail="binding not found")
+
+    source = db.get(Source, binding.source_id)
+    destination = db.get(Destination, binding.destination_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    if destination is None:
+        raise HTTPException(status_code=404, detail="destination not found")
+
+    source_result = _validate_source_connection(source)
+    destination_result = _validate_destination_connection(destination, binding)
+
+    return {
+        "ok": True,
+        "source": source_result,
+        "destination": destination_result,
+        "message": "Binding is valid",
+    }
+
+
+@app.post("/validate/source")
+def validate_source_payload(payload: SourceCreate) -> dict:
+    source = Source(**payload.model_dump())
+    return _validate_source_connection(source)
+
+
+@app.post("/validate/destination")
+def validate_destination_payload(payload: DestinationCreate) -> dict:
+    destination = Destination(**payload.model_dump())
+    return _validate_destination_connection(destination)
+
+
+@app.post("/validate/binding")
+def validate_binding_payload(payload: BindingCreate, db: Session = Depends(get_db)) -> dict:
+    source = db.get(Source, payload.source_id)
+    destination = db.get(Destination, payload.destination_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    if destination is None:
+        raise HTTPException(status_code=404, detail="destination not found")
+
+    binding = Binding(**payload.model_dump())
+    source_result = _validate_source_connection(source)
+    destination_result = _validate_destination_connection(destination, binding)
+
+    return {
+        "ok": True,
+        "source": source_result,
+        "destination": destination_result,
+        "message": "Binding is valid",
+    }
 
 
 @app.post("/runs/trigger/{binding_id}", response_model=RunRead)

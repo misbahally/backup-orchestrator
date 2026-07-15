@@ -69,9 +69,21 @@ function renderSourcesTable(sources) {
       <td>${s.name}</td>
       <td>${s.source_type}</td>
       <td>${s.is_active ? "yes" : "no"}</td>
+      <td><button class="btn btn-sm btn-outline-secondary test-source-row" data-source-id="${s.id}" type="button">Test</button></td>
     `;
     body.appendChild(tr);
   }
+
+  body.querySelectorAll(".test-source-row").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        const result = await api(`/validate/source/${Number(btn.dataset.sourceId)}`);
+        setFlash(result.message || "Source validated");
+      } catch (err) {
+        setFlash(`Source test failed: ${err.message}`, "danger");
+      }
+    });
+  });
 }
 
 function renderDestinationsTable(destinations) {
@@ -84,9 +96,21 @@ function renderDestinationsTable(destinations) {
       <td>${d.name}</td>
       <td>${d.provider}</td>
       <td>${d.bucket}</td>
+      <td><button class="btn btn-sm btn-outline-secondary test-destination-row" data-destination-id="${d.id}" type="button">Test</button></td>
     `;
     body.appendChild(tr);
   }
+
+  body.querySelectorAll(".test-destination-row").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        const result = await api(`/validate/destination/${Number(btn.dataset.destinationId)}`);
+        setFlash(result.message || "Destination validated");
+      } catch (err) {
+        setFlash(`Destination test failed: ${err.message}`, "danger");
+      }
+    });
+  });
 }
 
 function renderBindingsTable(bindings) {
@@ -100,6 +124,7 @@ function renderBindingsTable(bindings) {
       <td>${b.destination_id}</td>
       <td><code>${b.schedule_cron}</code></td>
       <td><button class="btn btn-sm btn-outline-primary trigger-run" data-binding-id="${b.id}" type="button">Trigger</button></td>
+      <td><button class="btn btn-sm btn-outline-secondary test-binding-row" data-binding-id="${b.id}" type="button">Test</button></td>
     `;
     body.appendChild(tr);
   }
@@ -113,6 +138,17 @@ function renderBindingsTable(bindings) {
         await refreshRuns();
       } catch (err) {
         setFlash(`Could not trigger run: ${err.message}`, "danger");
+      }
+    });
+  });
+
+  body.querySelectorAll(".test-binding-row").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        const result = await api(`/validate/binding/${Number(btn.dataset.bindingId)}`);
+        setFlash(result.message || "Binding validated");
+      } catch (err) {
+        setFlash(`Binding test failed: ${err.message}`, "danger");
       }
     });
   });
@@ -234,6 +270,50 @@ async function boot() {
     btn.addEventListener("click", () => {
       showConfigView(btn.dataset.configView);
     });
+  });
+
+  document.getElementById("test-source-btn").addEventListener("click", async () => {
+    try {
+      const f = new FormData(document.getElementById("source-form"));
+      const payload = {
+        name: f.get("name"),
+        source_type: f.get("source_type"),
+        settings: parseJsonOrEmpty(f.get("settings")),
+        is_active: true,
+      };
+      const result = await api("/validate/source", { method: "POST", body: JSON.stringify(payload) });
+      setFlash(result.message || "Source validated");
+    } catch (err) {
+      setFlash(`Source test failed: ${err.message}`, "danger");
+    }
+  });
+
+  document.getElementById("test-destination-btn").addEventListener("click", async () => {
+    try {
+      const f = new FormData(document.getElementById("destination-form"));
+      const payload = Object.fromEntries(f.entries());
+      const result = await api("/validate/destination", { method: "POST", body: JSON.stringify(payload) });
+      setFlash(result.message || "Destination validated");
+    } catch (err) {
+      setFlash(`Destination test failed: ${err.message}`, "danger");
+    }
+  });
+
+  document.getElementById("test-binding-btn").addEventListener("click", async () => {
+    try {
+      const f = new FormData(document.getElementById("binding-form"));
+      const payload = {
+        source_id: Number(f.get("source_id")),
+        destination_id: Number(f.get("destination_id")),
+        schedule_cron: f.get("schedule_cron"),
+        policy: parseJsonOrEmpty(f.get("policy")),
+        is_active: true,
+      };
+      const result = await api("/validate/binding", { method: "POST", body: JSON.stringify(payload) });
+      setFlash(result.message || "Binding validated");
+    } catch (err) {
+      setFlash(`Binding test failed: ${err.message}`, "danger");
+    }
   });
 
   const destinationForm = document.getElementById("destination-form");

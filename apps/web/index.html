@@ -82,6 +82,7 @@
               <div class="row g-4">
                 <div class="col-lg-5">
                   <h3 class="h5">New Source</h3>
+                  <p class="text-body-secondary small mb-2">For S3 sources, put bucket access and encryption settings in <code>settings</code>. Example: <code>{"bucket":"prod","prefix":"daily","encryption":{"mode":"SSE-C","customer_key_ref":"env:SOURCE_SSE_C_KEY"}}</code></p>
                   <form id="source-form" class="vstack gap-3">
                     <input class="form-control" name="name" placeholder="Source Name" required />
                     <select class="form-select" name="source_type" required>
@@ -91,12 +92,17 @@
                       <option value="rds">rds</option>
                       <option value="other">other</option>
                     </select>
-                    <textarea class="form-control" name="settings" placeholder='Settings JSON, e.g. {"bucket":"prod"}'></textarea>
-                    <button class="btn btn-primary" type="submit">Save Source</button>
+                    <textarea class="form-control" name="settings" placeholder='Settings JSON, e.g. {"bucket":"prod","encryption":{"mode":"SSE-S3"}}'></textarea>
+                    <div class="d-flex gap-2 flex-wrap">
+                      <button class="btn btn-primary" type="submit">Save Source</button>
+                      <button class="btn btn-outline-secondary" id="test-source-btn" type="button">Test Source</button>
+                    </div>
                   </form>
                 </div>
                 <div class="col-lg-7">
-                  <h3 class="h5">Registered Sources</h3>
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h3 class="h5 mb-0">Registered Sources</h3>
+                  </div>
                   <div class="table-responsive">
                     <table class="table table-sm align-middle">
                       <thead>
@@ -105,6 +111,7 @@
                           <th>Name</th>
                           <th>Type</th>
                           <th>Active</th>
+                          <th>Test</th>
                         </tr>
                       </thead>
                       <tbody id="sources-body"></tbody>
@@ -118,6 +125,7 @@
               <div class="row g-4">
                 <div class="col-lg-5">
                   <h3 class="h5">New Destination</h3>
+                  <p class="text-body-secondary small mb-2">Use <code>secret_ref</code> for credentials. Example destination encryption: <code>{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}</code> or <code>{"mode":"SSE-C","customer_key_ref":"env:DEST_SSE_C_KEY"}</code>.</p>
                   <form id="destination-form" class="vstack gap-3">
                     <input class="form-control" name="name" placeholder="Destination Name" required />
                     <input class="form-control" name="provider" placeholder="Provider" value="s3-compatible" required />
@@ -125,11 +133,16 @@
                     <input class="form-control" name="bucket" placeholder="Bucket" required />
                     <input class="form-control" name="region" placeholder="Region" value="us-east-1" required />
                     <input class="form-control" name="secret_ref" placeholder="Secret Ref" required />
-                    <button class="btn btn-primary" type="submit">Save Destination</button>
+                    <div class="d-flex gap-2 flex-wrap">
+                      <button class="btn btn-primary" type="submit">Save Destination</button>
+                      <button class="btn btn-outline-secondary" id="test-destination-btn" type="button">Test Destination</button>
+                    </div>
                   </form>
                 </div>
                 <div class="col-lg-7">
-                  <h3 class="h5">Registered Destinations</h3>
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h3 class="h5 mb-0">Registered Destinations</h3>
+                  </div>
                   <div class="table-responsive">
                     <table class="table table-sm align-middle">
                       <thead>
@@ -138,6 +151,7 @@
                           <th>Name</th>
                           <th>Provider</th>
                           <th>Bucket</th>
+                          <th>Test</th>
                         </tr>
                       </thead>
                       <tbody id="destinations-body"></tbody>
@@ -151,16 +165,22 @@
               <div class="row g-4">
                 <div class="col-lg-5">
                   <h3 class="h5">Create Binding</h3>
+                  <p class="text-body-secondary small mb-2">Put source encryption under <code>settings.encryption</code> and destination encryption under <code>policy.encryption</code>. Example: <code>{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}</code>.</p>
                   <form id="binding-form" class="vstack gap-3">
                     <select class="form-select" name="source_id" id="source-select" required></select>
                     <select class="form-select" name="destination_id" id="destination-select" required></select>
                     <input class="form-control" name="schedule_cron" value="0 2 * * *" required />
-                    <textarea class="form-control" name="policy" placeholder='Policy JSON, e.g. {"retention_days":30}'></textarea>
-                    <button class="btn btn-primary" type="submit">Create Binding</button>
+                    <textarea class="form-control" name="policy" placeholder='Policy JSON, e.g. {"retention_days":30,"dest_prefix":"daily","encryption":{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}}'></textarea>
+                    <div class="d-flex gap-2 flex-wrap">
+                      <button class="btn btn-primary" type="submit">Create Binding</button>
+                      <button class="btn btn-outline-secondary" id="test-binding-btn" type="button">Test Binding</button>
+                    </div>
                   </form>
                 </div>
                 <div class="col-lg-7">
-                  <h3 class="h5">Active Bindings</h3>
+                  <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h3 class="h5 mb-0">Active Bindings</h3>
+                  </div>
                   <div class="table-responsive">
                     <table class="table table-sm align-middle">
                       <thead>
@@ -170,6 +190,7 @@
                           <th>Destination</th>
                           <th>Schedule</th>
                           <th>Action</th>
+                          <th>Test</th>
                         </tr>
                       </thead>
                       <tbody id="bindings-body"></tbody>
