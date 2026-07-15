@@ -49,6 +49,82 @@ def _load_secret(secret_ref: str) -> dict[str, str]:
     return {}
 
 
+def _load_text_secret(secret_ref: str) -> str:
+    """Resolve a plain-text secret from env ref or inline value."""
+    if not secret_ref:
+        return ""
+
+    ref = secret_ref.strip()
+    if ref.startswith("env:"):
+        return os.environ.get(ref[4:], "").strip()
+
+    if ref in os.environ:
+        return os.environ.get(ref, "").strip()
+
+    return ref
+
+
+def _normalise_encryption_config(raw: Any) -> dict[str, Any]:
+    if not raw:
+        return {}
+    if isinstance(raw, str):
+        raw = raw.strip()
+        if not raw:
+            return {}
+        return json.loads(raw)
+    if isinstance(raw, dict):
+        return raw
+    raise TypeError(f"Unsupported encryption config type: {type(raw)!r}")
+
+
+def _customer_key_headers(encryption: dict[str, Any]) -> dict[str, str]:
+    if not encryption:
+        return {}
+
+    mode = str(encryption.get("mode", "")).upper()
+    if mode not in {"SSE-C", "SSE_C", "CUSTOMER", "AES256-C"}:
+        return {}
+
+    customer_key_ref = encryption.get("customer_key_ref") or encryption.get("customer_key_secret_ref")
+    customer_key = encryption.get("customer_key") or _load_text_secret(str(customer_key_ref or ""))
+    if not customer_key:
+        raise ValueError("SSE-C encryption requires customer_key or customer_key_ref")
+
+    headers: dict[str, str] = {
+        "SSECustomerAlgorithm": str(encryption.get("algorithm", "AES256")),
+        "SSECustomerKey": customer_key,
+    }
+
+    customer_key_md5 = encryption.get("customer_key_md5")
+    if customer_key_md5:
+        headers["SSECustomerKeyMD5"] = str(customer_key_md5)
+
+    return headers
+
+
+def _upload_extra_args(encryption: dict[str, Any]) -> dict[str, Any]:
+    if not encryption:
+        return {}
+
+    mode = str(encryption.get("mode", "")).upper()
+    if mode in {"SSE-S3", "SSE_S3", "AES256"}:
+        return {"ServerSideEncryption": "AES256"}
+
+    if mode in {"SSE-KMS", "SSE_KMS", "AWS:KMS", "AWS-KMS"}:
+        extra_args: dict[str, Any] = {"ServerSideEncryption": "aws:kms"}
+        kms_key_id = encryption.get("kms_key_id") or encryption.get("kms_key_arn")
+        if kms_key_id:
+            extra_args["SSEKMSKeyId"] = str(kms_key_id)
+        if encryption.get("bucket_key_enabled") is not None:
+            extra_args["BucketKeyEnabled"] = bool(encryption.get("bucket_key_enabled"))
+        return extra_args
+
+    if mode in {"SSE-C", "SSE_C", "CUSTOMER", "AES256-C"}:
+        return _customer_key_headers(encryption)
+
+    return {}
+
+
 def _make_s3_client(region: str, endpoint: str, creds: dict[str, str]) -> Any:
     kwargs: dict[str, Any] = {
         "service_name": "s3",
@@ -75,9 +151,17 @@ def _dest_key_for(source_key: str, source_prefix: str, dest_prefix: str) -> str:
     return "/".join(part for part in (dest_prefix, rel) if part)
 
 
-def _exists_with_same_size(s3_client: Any, bucket: str, key: str, size: int) -> bool:
+def _exists_with_same_size(
+    s3_client: Any,
+    bucket: str,
+    key: str,
+    size: int,
+    encryption: dict[str, Any] | None = None,
+) -> bool:
     try:
-        obj = s3_client.head_object(Bucket=bucket, Key=key)
+        head_kwargs: dict[str, Any] = {"Bucket": bucket, "Key": key}
+        head_kwargs.update(_customer_key_headers(encryption or {}))
+        obj = s3_client.head_object(**head_kwargs)
         return int(obj.get("ContentLength", -1)) == int(size)
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "")
@@ -97,6 +181,11 @@ def run_s3_to_s3(source: Any, destination: Any, binding: Any) -> dict[str, int]:
 
     source_prefix = str(source_settings.get("prefix", "")).strip().strip("/")
     dest_prefix = str(policy.get("dest_prefix", "")).strip().strip("/")
+
+    source_encryption = _normalise_encryption_config(source_settings.get("encryption") or source_settings.get("sse"))
+    destination_encryption = _normalise_encryption_config(
+        policy.get("encryption") or policy.get("destination_encryption") or destination.__dict__.get("encryption")
+    )
 
     src_region = source_settings.get("region", "us-east-1")
     src_endpoint = source_settings.get("endpoint", "")
@@ -126,14 +215,20 @@ def run_s3_to_s3(source: Any, destination: Any, binding: Any) -> dict[str, int]:
 
             target_key = _dest_key_for(key, source_prefix, dest_prefix)
 
-            if _exists_with_same_size(dst, destination.bucket, target_key, size):
+            if _exists_with_same_size(dst, destination.bucket, target_key, size, destination_encryption):
                 skipped += 1
                 continue
 
-            response = src.get_object(Bucket=source_bucket, Key=key)
+            get_kwargs: dict[str, Any] = {"Bucket": source_bucket, "Key": key}
+            get_kwargs.update(_customer_key_headers(source_encryption))
+            response = src.get_object(**get_kwargs)
             body = response["Body"]
             try:
-                dst.upload_fileobj(body, destination.bucket, target_key)
+                extra_args = _upload_extra_args(destination_encryption)
+                if extra_args:
+                    dst.upload_fileobj(body, destination.bucket, target_key, ExtraArgs=extra_args)
+                else:
+                    dst.upload_fileobj(body, destination.bucket, target_key)
             finally:
                 body.close()
 
