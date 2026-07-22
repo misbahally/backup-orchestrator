@@ -28,6 +28,24 @@ function setFlash(message, kind = "success") {
   setTimeout(() => flash.classList.add("d-none"), 2500);
 }
 
+function renderValidationCard(container, title, result) {
+  const card = document.createElement("div");
+  card.className = "card border-0 shadow-sm mt-3";
+  card.innerHTML = `
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start gap-2">
+        <div>
+          <h4 class="h6 mb-1">${title}</h4>
+          <div class="text-muted small">${result?.message || "No output"}</div>
+        </div>
+        <span class="badge text-bg-${result?.ok ? "success" : "danger"}">${result?.ok ? "ok" : "error"}</span>
+      </div>
+      ${result?.details ? `<pre class="small mt-3 mb-0">${JSON.stringify(result.details, null, 2)}</pre>` : ""}
+    </div>
+  `;
+  container.appendChild(card);
+}
+
 function badgeForStatus(status) {
   const map = {
     queued: "secondary",
@@ -106,6 +124,9 @@ function renderDestinationsTable(destinations) {
       try {
         const result = await api(`/validate/destination/${Number(btn.dataset.destinationId)}`);
         setFlash(result.message || "Destination validated");
+        const container = document.getElementById("validation-results");
+        container.innerHTML = "";
+        renderValidationCard(container, "Destination Validation", result);
       } catch (err) {
         setFlash(`Destination test failed: ${err.message}`, "danger");
       }
@@ -147,6 +168,9 @@ function renderBindingsTable(bindings) {
       try {
         const result = await api(`/validate/binding/${Number(btn.dataset.bindingId)}`);
         setFlash(result.message || "Binding validated");
+        const container = document.getElementById("validation-results");
+        container.innerHTML = "";
+        renderValidationCard(container, "Binding Validation", result);
       } catch (err) {
         setFlash(`Binding test failed: ${err.message}`, "danger");
       }
@@ -241,7 +265,7 @@ async function refreshRuns() {
   for (const run of runs) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td>${run.id}</td>
+      <td><a href="#" class="text-decoration-none" data-run-id="${run.id}">${run.id}</a></td>
       <td>${run.binding_id}</td>
       <td>${badgeForStatus(run.status)}</td>
       <td>${run.started_at || ""}</td>
@@ -251,6 +275,21 @@ async function refreshRuns() {
     `;
     body.appendChild(tr);
   }
+
+  body.querySelectorAll("a[data-run-id]").forEach((link) => {
+    link.addEventListener("click", async (event) => {
+      event.preventDefault();
+      const runId = link.dataset.runId;
+      try {
+        const detail = await api(`/runs/${runId}`);
+        const panel = document.getElementById("run-detail-panel");
+        panel.innerHTML = "";
+        renderValidationCard(panel, "Run Detail", { ok: true, message: detail.message || "Run inspected", details: detail });
+      } catch (err) {
+        setFlash(`Could not load run detail: ${err.message}`, "danger");
+      }
+    });
+  });
 }
 
 async function boot() {
@@ -283,6 +322,9 @@ async function boot() {
       };
       const result = await api("/validate/source", { method: "POST", body: JSON.stringify(payload) });
       setFlash(result.message || "Source validated");
+      const container = document.getElementById("validation-results");
+      container.innerHTML = "";
+      renderValidationCard(container, "Source Validation", result);
     } catch (err) {
       setFlash(`Source test failed: ${err.message}`, "danger");
     }
@@ -294,6 +336,9 @@ async function boot() {
       const payload = Object.fromEntries(f.entries());
       const result = await api("/validate/destination", { method: "POST", body: JSON.stringify(payload) });
       setFlash(result.message || "Destination validated");
+      const container = document.getElementById("validation-results");
+      container.innerHTML = "";
+      renderValidationCard(container, "Destination Validation", result);
     } catch (err) {
       setFlash(`Destination test failed: ${err.message}`, "danger");
     }
@@ -311,6 +356,9 @@ async function boot() {
       };
       const result = await api("/validate/binding", { method: "POST", body: JSON.stringify(payload) });
       setFlash(result.message || "Binding validated");
+      const container = document.getElementById("validation-results");
+      container.innerHTML = "";
+      renderValidationCard(container, "Binding Validation", result);
     } catch (err) {
       setFlash(`Binding test failed: ${err.message}`, "danger");
     }

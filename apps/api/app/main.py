@@ -1,6 +1,5 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import json
-import os
 from typing import Any
 
 import boto3
@@ -23,6 +22,7 @@ from .schemas import (
     SourceCreate,
     SourceRead,
 )
+from .secret_resolver import resolve_secret_mapping, resolve_secret_text
 
 app = FastAPI(title="Backup Control Plane API", version="0.1.0")
 
@@ -46,42 +46,11 @@ def queue() -> Queue:
 
 
 def _load_text_secret(secret_ref: str) -> str:
-    if not secret_ref:
-        return ""
-
-    ref = secret_ref.strip()
-    if ref.startswith("env:"):
-        return os.environ.get(ref[4:], "").strip()
-
-    if ref in os.environ:
-        return os.environ.get(ref, "").strip()
-
-    return ref
+    return resolve_secret_text(secret_ref)
 
 
 def _load_secret(secret_ref: str) -> dict[str, str]:
-    raw = _load_text_secret(secret_ref)
-    if not raw:
-        return {}
-
-    raw = raw.strip()
-    if raw.startswith("{"):
-        parsed = json.loads(raw)
-        return {
-            "aws_access_key_id": parsed.get("aws_access_key_id") or parsed.get("access_key") or "",
-            "aws_secret_access_key": parsed.get("aws_secret_access_key") or parsed.get("secret_key") or "",
-            "aws_session_token": parsed.get("aws_session_token") or parsed.get("session_token") or "",
-        }
-
-    if ":" in raw:
-        access, secret = raw.split(":", 1)
-        return {
-            "aws_access_key_id": access,
-            "aws_secret_access_key": secret,
-            "aws_session_token": "",
-        }
-
-    return {}
+    return resolve_secret_mapping(secret_ref)
 
 
 def _make_s3_client(region: str, endpoint: str, creds: dict[str, str]) -> Any:
@@ -162,7 +131,7 @@ def _validate_source_connection(source: Source) -> dict[str, Any]:
         code = exc.response.get("Error", {}).get("Code", "")
         raise HTTPException(status_code=400, detail=f"source validation failed: {code or str(exc)}")
 
-    return {"ok": True, "message": f"Source bucket {bucket} is reachable"}
+    return {"ok": True, "message": f"Source bucket {bucket} is reachable", "details": {"bucket": bucket, "source_id": source.id}}
 
 
 def _validate_destination_connection(destination: Destination, binding: Binding | None = None) -> dict[str, Any]:
@@ -182,7 +151,7 @@ def _validate_destination_connection(destination: Destination, binding: Binding 
         code = exc.response.get("Error", {}).get("Code", "")
         raise HTTPException(status_code=400, detail=f"destination validation failed: {code or str(exc)}")
 
-    return {"ok": True, "message": f"Destination bucket {destination.bucket} is reachable"}
+    return {"ok": True, "message": f"Destination bucket {destination.bucket} is reachable", "details": {"bucket": destination.bucket, "destination_id": destination.id}}
 
 
 @app.get("/health")
@@ -321,7 +290,7 @@ def trigger_run(binding_id: int, db: Session = Depends(get_db)) -> BackupRun:
     run = BackupRun(
         binding_id=binding_id,
         status=RunStatus.queued,
-        started_at=datetime.utcnow(),
+        started_at=datetime.now(timezone.utc),
         message="Queued",
     )
     db.add(run)
@@ -336,6 +305,23 @@ def trigger_run(binding_id: int, db: Session = Depends(get_db)) -> BackupRun:
 @app.get("/runs", response_model=list[RunRead])
 def list_runs(db: Session = Depends(get_db)) -> list[BackupRun]:
     return db.query(BackupRun).order_by(BackupRun.id.desc()).limit(100).all()
+
+
+@app.get("/runs/{run_id}")
+def read_run(run_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+    run = db.get(BackupRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+
+    return {
+        "id": run.id,
+        "binding_id": run.binding_id,
+        "status": run.status.value,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "bytes_transferred": run.bytes_transferred,
+        "message": run.message,
+    }
 
 
 @app.get("/topology")

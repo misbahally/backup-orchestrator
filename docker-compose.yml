@@ -55,6 +55,22 @@ services:
       redis:
         condition: service_started
 
+  scheduler:
+    build:
+      context: ./apps/worker
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://backup:backup@postgres:5432/backup_control}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+    command: ["python", "scheduler.py"]
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
   web:
     image: nginx:alpine
     environment:

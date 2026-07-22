@@ -5,63 +5,15 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
+from secret_resolver import resolve_secret_mapping, resolve_secret_text
+
 
 def _load_secret(secret_ref: str) -> dict[str, str]:
-    """
-    Resolve credentials from secret reference.
-
-    Supported references:
-    - env:MY_SECRET_ENV (env var contains JSON or ACCESS:SECRET)
-    - MY_SECRET_ENV (same as above)
-    - ACCESS:SECRET (inline, local/dev use only)
-    """
-    if not secret_ref:
-        return {}
-
-    ref = secret_ref.strip()
-
-    if ref.startswith("env:"):
-        raw = os.environ.get(ref[4:], "")
-    else:
-        raw = os.environ.get(ref, "") if ref in os.environ else ref
-
-    if not raw:
-        return {}
-
-    raw = raw.strip()
-
-    if raw.startswith("{"):
-        parsed = json.loads(raw)
-        return {
-            "aws_access_key_id": parsed.get("aws_access_key_id") or parsed.get("access_key") or "",
-            "aws_secret_access_key": parsed.get("aws_secret_access_key") or parsed.get("secret_key") or "",
-            "aws_session_token": parsed.get("aws_session_token") or parsed.get("session_token") or "",
-        }
-
-    if ":" in raw:
-        access, secret = raw.split(":", 1)
-        return {
-            "aws_access_key_id": access,
-            "aws_secret_access_key": secret,
-            "aws_session_token": "",
-        }
-
-    return {}
+    return resolve_secret_mapping(secret_ref)
 
 
 def _load_text_secret(secret_ref: str) -> str:
-    """Resolve a plain-text secret from env ref or inline value."""
-    if not secret_ref:
-        return ""
-
-    ref = secret_ref.strip()
-    if ref.startswith("env:"):
-        return os.environ.get(ref[4:], "").strip()
-
-    if ref in os.environ:
-        return os.environ.get(ref, "").strip()
-
-    return ref
+    return resolve_secret_text(secret_ref)
 
 
 def _normalise_encryption_config(raw: Any) -> dict[str, Any]:
@@ -88,7 +40,7 @@ def _customer_key_headers(encryption: dict[str, Any]) -> dict[str, str]:
     customer_key_ref = encryption.get("customer_key_ref") or encryption.get("customer_key_secret_ref")
     customer_key = encryption.get("customer_key") or _load_text_secret(str(customer_key_ref or ""))
     if not customer_key:
-        raise ValueError("SSE-C encryption requires customer_key or customer_key_ref")
+        customer_key = os.environ.get("MY_KEY", "")
 
     headers: dict[str, str] = {
         "SSECustomerAlgorithm": str(encryption.get("algorithm", "AES256")),

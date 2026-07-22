@@ -41,6 +41,9 @@ This scaffold provides:
 - DB-backed source/destination/binding configuration
 - Job queue integration with run state transitions
 - Topology visualization in a separate frontend service
+- Shared secret resolution for API and worker
+- Structured validation diagnostics and run detail inspection
+- Scheduler entry point for active bindings
 
 It intentionally does **not** yet implement cloud-specific backup logic; that will be added as source plugins in the worker.
 
