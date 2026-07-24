@@ -44,6 +44,10 @@ class BindingCreate(BaseModel):
     is_active: bool = True
 
 
+class RunCancelRequest(BaseModel):
+    run_ids: list[int]
+
+
 class BindingRead(BindingCreate):
     id: int
 

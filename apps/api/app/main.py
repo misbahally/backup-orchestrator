@@ -8,6 +8,9 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from redis import Redis
 from rq import Queue
+from rq.command import send_stop_job_command
+from rq.job import Job
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -18,6 +21,7 @@ from .schemas import (
     BindingRead,
     DestinationCreate,
     DestinationRead,
+    RunCancelRequest,
     RunRead,
     SourceCreate,
     SourceRead,
@@ -208,6 +212,43 @@ def list_bindings(db: Session = Depends(get_db)) -> list[Binding]:
     return db.query(Binding).order_by(Binding.id.desc()).all()
 
 
+@app.put("/bindings/{binding_id}", response_model=BindingRead)
+def update_binding(binding_id: int, payload: BindingCreate, db: Session = Depends(get_db)) -> Binding:
+    item = db.get(Binding, binding_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="binding not found")
+
+    source = db.get(Source, payload.source_id)
+    dest = db.get(Destination, payload.destination_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="source not found")
+    if dest is None:
+        raise HTTPException(status_code=404, detail="destination not found")
+
+    for key, value in payload.model_dump().items():
+        setattr(item, key, value)
+
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@app.delete("/bindings/{binding_id}")
+def delete_binding(binding_id: int, db: Session = Depends(get_db)) -> dict[str, bool]:
+    item = db.get(Binding, binding_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="binding not found")
+
+    db.delete(item)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="binding has existing runs and cannot be deleted")
+
+    return {"ok": True}
+
+
 @app.get("/validate/source/{source_id}")
 def validate_source(source_id: int, db: Session = Depends(get_db)) -> dict:
     source = db.get(Source, source_id)
@@ -298,8 +339,85 @@ def trigger_run(binding_id: int, db: Session = Depends(get_db)) -> BackupRun:
     db.refresh(run)
 
     q = queue()
-    q.enqueue("tasks.run_backup_job", run.id)
+    job = q.enqueue("tasks.run_backup_job", run.id)
+    run.message = f"Queued (job {job.id})"
+    db.commit()
     return run
+
+
+def _cancel_run(run: BackupRun, q: Queue, db: Session) -> tuple[bool, str]:
+    if run.status.value not in {"queued", "running"}:
+        return False, f"run is {run.status.value}"
+
+    job_id = ""
+    if run.message and "Queued (job " in run.message:
+        job_id = run.message.removeprefix("Queued (job ").removesuffix(")")
+
+    if not job_id:
+        return False, "no queue job id found for this run"
+
+    try:
+        job = Job.fetch(job_id, connection=q.connection)
+    except Exception:
+        if run.status.value == "queued":
+            return False, "queue job no longer exists"
+        run.message = "Cancellation requested (worker is already running)"
+        db.commit()
+        return True, "cancellation requested"
+
+    status = job.get_status(refresh=True)
+
+    if status in {"queued", "deferred", "scheduled"}:
+        job.cancel()
+        run.status = RunStatus.failed
+        run.finished_at = datetime.now(timezone.utc)
+        run.message = "Cancelled before execution"
+        db.commit()
+        return True, "cancelled"
+
+    if status in {"started", "busy"}:
+        send_stop_job_command(q.connection, job_id)
+        run.message = "Cancellation requested"
+        db.commit()
+        return True, "cancellation requested"
+
+    return False, f"job already {status}"
+
+
+@app.post("/runs/cancel")
+def cancel_runs(payload: RunCancelRequest, db: Session = Depends(get_db)) -> dict[str, Any]:
+    if not payload.run_ids:
+        raise HTTPException(status_code=400, detail="run_ids cannot be empty")
+
+    q = queue()
+    cancelled: list[dict[str, Any]] = []
+    not_cancelled: list[dict[str, Any]] = []
+
+    for run_id in payload.run_ids:
+        run = db.get(BackupRun, run_id)
+        if run is None:
+            not_cancelled.append({"run_id": run_id, "reason": "run not found"})
+            continue
+
+        ok, reason = _cancel_run(run, q, db)
+        if ok:
+            cancelled.append({"run_id": run_id, "result": reason})
+        else:
+            not_cancelled.append({"run_id": run_id, "reason": reason})
+
+    return {"cancelled": cancelled, "not_cancelled": not_cancelled}
+
+
+@app.post("/runs/{run_id}/cancel")
+def cancel_single_run(run_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
+    run = db.get(BackupRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+
+    ok, reason = _cancel_run(run, queue(), db)
+    if not ok:
+        raise HTTPException(status_code=409, detail=reason)
+    return {"ok": True, "result": reason}
 
 
 @app.get("/runs", response_model=list[RunRead])

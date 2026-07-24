@@ -172,7 +172,8 @@
                     <input class="form-control" name="schedule_cron" value="0 2 * * *" required />
                     <textarea class="form-control" name="policy" placeholder='Policy JSON, e.g. {"retention_days":30,"dest_prefix":"daily","encryption":{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}}'></textarea>
                     <div class="d-flex gap-2 flex-wrap">
-                      <button class="btn btn-primary" type="submit">Create Binding</button>
+                      <button class="btn btn-primary" id="binding-submit-btn" type="submit">Create Binding</button>
+                      <button class="btn btn-outline-secondary d-none" id="binding-cancel-edit-btn" type="button">Cancel Edit</button>
                       <button class="btn btn-outline-secondary" id="test-binding-btn" type="button">Test Binding</button>
                     </div>
                   </form>
@@ -189,7 +190,9 @@
                           <th>Source</th>
                           <th>Destination</th>
                           <th>Schedule</th>
-                          <th>Action</th>
+                          <th>Run</th>
+                          <th>Edit</th>
+                          <th>Delete</th>
                           <th>Test</th>
                         </tr>
                       </thead>
@@ -210,13 +213,17 @@
               <h2 class="h4 mb-1">Run Operations</h2>
               <p class="text-body-secondary mb-3">Track execution status and recent backup outcomes.</p>
             </div>
-            <button id="refresh-runs" class="btn btn-outline-primary btn-sm" type="button">Refresh</button>
+            <div class="d-flex gap-2">
+              <button id="cancel-selected-runs" class="btn btn-outline-danger btn-sm" type="button">Cancel Selected</button>
+              <button id="refresh-runs" class="btn btn-outline-primary btn-sm" type="button">Refresh</button>
+            </div>
           </div>
           <div class="card-body px-4 pb-4">
             <div class="table-responsive">
               <table class="table table-hover align-middle">
                 <thead>
                   <tr>
+                    <th><input id="select-all-runs" type="checkbox" /></th>
                     <th>Run ID</th>
                     <th>Binding</th>
                     <th>Status</th>
@@ -224,6 +231,7 @@
                     <th>Finished</th>
                     <th>Bytes</th>
                     <th>Message</th>
+                    <th>Cancel</th>
                   </tr>
                 </thead>
                 <tbody id="runs-body"></tbody>

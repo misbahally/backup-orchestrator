@@ -30,7 +30,9 @@ def enqueue_due_bindings() -> int:
             db.add(run)
             db.commit()
             db.refresh(run)
-            queue.enqueue("tasks.run_backup_job", run.id)
+            job = queue.enqueue("tasks.run_backup_job", run.id)
+            run.message = f"Queued (job {job.id})"
+            db.commit()
             logger.info("Enqueued run %s for binding %s at %s", run.id, binding.id, datetime.now(timezone.utc))
             enqueued += 1
         return enqueued
