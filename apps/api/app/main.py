@@ -177,6 +177,36 @@ def list_destinations(db: Session = Depends(get_db)) -> list[Destination]:
     return db.query(Destination).order_by(Destination.id.desc()).all()
 
 
+@app.put("/destinations/{destination_id}", response_model=DestinationRead)
+def update_destination(destination_id: int, payload: DestinationCreate, db: Session = Depends(get_db)) -> Destination:
+    item = db.get(Destination, destination_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="destination not found")
+
+    for key, value in payload.model_dump().items():
+        setattr(item, key, value)
+
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@app.delete("/destinations/{destination_id}")
+def delete_destination(destination_id: int, db: Session = Depends(get_db)) -> dict[str, bool]:
+    item = db.get(Destination, destination_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="destination not found")
+
+    db.delete(item)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="destination is used by one or more bindings")
+
+    return {"ok": True}
+
+
 @app.post("/sources", response_model=SourceRead)
 def create_source(payload: SourceCreate, db: Session = Depends(get_db)) -> Source:
     item = Source(**payload.model_dump())
@@ -189,6 +219,36 @@ def create_source(payload: SourceCreate, db: Session = Depends(get_db)) -> Sourc
 @app.get("/sources", response_model=list[SourceRead])
 def list_sources(db: Session = Depends(get_db)) -> list[Source]:
     return db.query(Source).order_by(Source.id.desc()).all()
+
+
+@app.put("/sources/{source_id}", response_model=SourceRead)
+def update_source(source_id: int, payload: SourceCreate, db: Session = Depends(get_db)) -> Source:
+    item = db.get(Source, source_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="source not found")
+
+    for key, value in payload.model_dump().items():
+        setattr(item, key, value)
+
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@app.delete("/sources/{source_id}")
+def delete_source(source_id: int, db: Session = Depends(get_db)) -> dict[str, bool]:
+    item = db.get(Source, source_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="source not found")
+
+    db.delete(item)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="source is used by one or more bindings")
+
+    return {"ok": True}
 
 
 @app.post("/bindings", response_model=BindingRead)
@@ -369,7 +429,7 @@ def _cancel_run(run: BackupRun, q: Queue, db: Session) -> tuple[bool, str]:
 
     if status in {"queued", "deferred", "scheduled"}:
         job.cancel()
-        run.status = RunStatus.failed
+        run.status = RunStatus.cancelled
         run.finished_at = datetime.now(timezone.utc)
         run.message = "Cancelled before execution"
         db.commit()

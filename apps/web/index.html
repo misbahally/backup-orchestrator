@@ -84,6 +84,7 @@
                   <h3 class="h5">New Source</h3>
                   <p class="text-body-secondary small mb-2">For S3 sources, put bucket access and encryption settings in <code>settings</code>. Example: <code>{"bucket":"prod","prefix":"daily","encryption":{"mode":"SSE-C","customer_key_ref":"env:SOURCE_SSE_C_KEY"}}</code></p>
                   <form id="source-form" class="vstack gap-3">
+                    <input type="hidden" name="is_active" value="true" />
                     <input class="form-control" name="name" placeholder="Source Name" required />
                     <select class="form-select" name="source_type" required>
                       <option value="s3">s3</option>
@@ -94,7 +95,8 @@
                     </select>
                     <textarea class="form-control" name="settings" placeholder='Settings JSON, e.g. {"bucket":"prod","encryption":{"mode":"SSE-S3"}}'></textarea>
                     <div class="d-flex gap-2 flex-wrap">
-                      <button class="btn btn-primary" type="submit">Save Source</button>
+                      <button class="btn btn-primary" id="source-submit-btn" type="submit">Save Source</button>
+                      <button class="btn btn-outline-secondary d-none" id="source-cancel-edit-btn" type="button">Cancel Edit</button>
                       <button class="btn btn-outline-secondary" id="test-source-btn" type="button">Test Source</button>
                     </div>
                   </form>
@@ -111,6 +113,8 @@
                           <th>Name</th>
                           <th>Type</th>
                           <th>Active</th>
+                          <th>Edit</th>
+                          <th>Delete</th>
                           <th>Test</th>
                         </tr>
                       </thead>
@@ -127,6 +131,7 @@
                   <h3 class="h5">New Destination</h3>
                   <p class="text-body-secondary small mb-2">Use <code>secret_ref</code> for credentials. Example destination encryption: <code>{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}</code> or <code>{"mode":"SSE-C","customer_key_ref":"env:DEST_SSE_C_KEY"}</code>.</p>
                   <form id="destination-form" class="vstack gap-3">
+                    <input type="hidden" name="is_active" value="true" />
                     <input class="form-control" name="name" placeholder="Destination Name" required />
                     <input class="form-control" name="provider" placeholder="Provider" value="s3-compatible" required />
                     <input class="form-control" name="endpoint" placeholder="Endpoint" required />
@@ -134,7 +139,8 @@
                     <input class="form-control" name="region" placeholder="Region" value="us-east-1" required />
                     <input class="form-control" name="secret_ref" placeholder="Secret Ref" required />
                     <div class="d-flex gap-2 flex-wrap">
-                      <button class="btn btn-primary" type="submit">Save Destination</button>
+                      <button class="btn btn-primary" id="destination-submit-btn" type="submit">Save Destination</button>
+                      <button class="btn btn-outline-secondary d-none" id="destination-cancel-edit-btn" type="button">Cancel Edit</button>
                       <button class="btn btn-outline-secondary" id="test-destination-btn" type="button">Test Destination</button>
                     </div>
                   </form>
@@ -151,6 +157,8 @@
                           <th>Name</th>
                           <th>Provider</th>
                           <th>Bucket</th>
+                          <th>Edit</th>
+                          <th>Delete</th>
                           <th>Test</th>
                         </tr>
                       </thead>

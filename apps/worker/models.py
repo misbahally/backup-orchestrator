@@ -20,6 +20,7 @@ class RunStatus(str, enum.Enum):
     running = "running"
     success = "success"
     failed = "failed"
+    cancelled = "cancelled"
 
 
 class Destination(Base):

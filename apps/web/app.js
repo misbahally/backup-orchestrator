@@ -1,5 +1,7 @@
 const API_BASE = localStorage.getItem("api_base_url") || "http://localhost:8000";
 let editingBindingId = null;
+let editingSourceId = null;
+let editingDestinationId = null;
 
 async function api(path, options = {}) {
   const resp = await fetch(`${API_BASE}${path}`, {
@@ -70,12 +72,80 @@ function getBindingPayloadFromForm() {
   };
 }
 
+function getSourcePayloadFromForm() {
+  const f = new FormData(document.getElementById("source-form"));
+  return {
+    name: f.get("name"),
+    source_type: f.get("source_type"),
+    settings: parseJsonOrEmpty(f.get("settings")),
+    is_active: String(f.get("is_active") || "true").toLowerCase() !== "false",
+  };
+}
+
+function getDestinationPayloadFromForm() {
+  const f = new FormData(document.getElementById("destination-form"));
+  return {
+    name: f.get("name"),
+    provider: f.get("provider"),
+    endpoint: f.get("endpoint"),
+    bucket: f.get("bucket"),
+    region: f.get("region"),
+    secret_ref: f.get("secret_ref"),
+    is_active: String(f.get("is_active") || "true").toLowerCase() !== "false",
+  };
+}
+
 function resetBindingEditState() {
   editingBindingId = null;
   const form = document.getElementById("binding-form");
   form.reset();
   document.getElementById("binding-submit-btn").textContent = "Create Binding";
   document.getElementById("binding-cancel-edit-btn").classList.add("d-none");
+}
+
+function resetSourceEditState() {
+  editingSourceId = null;
+  const form = document.getElementById("source-form");
+  form.reset();
+  form.querySelector("[name='is_active']").value = "true";
+  document.getElementById("source-submit-btn").textContent = "Save Source";
+  document.getElementById("source-cancel-edit-btn").classList.add("d-none");
+}
+
+function startSourceEdit(source) {
+  editingSourceId = source.id;
+  const form = document.getElementById("source-form");
+  form.querySelector("[name='name']").value = source.name;
+  form.querySelector("[name='source_type']").value = source.source_type;
+  form.querySelector("[name='settings']").value = JSON.stringify(source.settings || {}, null, 2);
+  form.querySelector("[name='is_active']").value = String(Boolean(source.is_active));
+  document.getElementById("source-submit-btn").textContent = "Save Source";
+  document.getElementById("source-cancel-edit-btn").classList.remove("d-none");
+}
+
+function resetDestinationEditState() {
+  editingDestinationId = null;
+  const form = document.getElementById("destination-form");
+  form.reset();
+  form.querySelector("[name='provider']").value = "s3-compatible";
+  form.querySelector("[name='region']").value = "us-east-1";
+  form.querySelector("[name='is_active']").value = "true";
+  document.getElementById("destination-submit-btn").textContent = "Save Destination";
+  document.getElementById("destination-cancel-edit-btn").classList.add("d-none");
+}
+
+function startDestinationEdit(destination) {
+  editingDestinationId = destination.id;
+  const form = document.getElementById("destination-form");
+  form.querySelector("[name='name']").value = destination.name;
+  form.querySelector("[name='provider']").value = destination.provider;
+  form.querySelector("[name='endpoint']").value = destination.endpoint;
+  form.querySelector("[name='bucket']").value = destination.bucket;
+  form.querySelector("[name='region']").value = destination.region;
+  form.querySelector("[name='secret_ref']").value = destination.secret_ref;
+  form.querySelector("[name='is_active']").value = String(Boolean(destination.is_active));
+  document.getElementById("destination-submit-btn").textContent = "Save Destination";
+  document.getElementById("destination-cancel-edit-btn").classList.remove("d-none");
 }
 
 function startBindingEdit(binding) {
@@ -119,6 +189,8 @@ function renderSourcesTable(sources) {
       <td>${s.name}</td>
       <td>${s.source_type}</td>
       <td>${s.is_active ? "yes" : "no"}</td>
+      <td><button class="btn btn-sm btn-outline-secondary edit-source-row" data-source-id="${s.id}" type="button">Edit</button></td>
+      <td><button class="btn btn-sm btn-outline-danger delete-source-row" data-source-id="${s.id}" type="button">Delete</button></td>
       <td><button class="btn btn-sm btn-outline-secondary test-source-row" data-source-id="${s.id}" type="button">Test</button></td>
     `;
     body.appendChild(tr);
@@ -134,6 +206,38 @@ function renderSourcesTable(sources) {
       }
     });
   });
+
+  body.querySelectorAll(".edit-source-row").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = Number(btn.dataset.sourceId);
+      const source = sources.find((item) => item.id === id);
+      if (!source) {
+        return;
+      }
+      startSourceEdit(source);
+    });
+  });
+
+  body.querySelectorAll(".delete-source-row").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.sourceId);
+      if (!window.confirm(`Delete source ${id}?`)) {
+        return;
+      }
+      try {
+        await api(`/sources/${id}`, { method: "DELETE" });
+        if (editingSourceId === id) {
+          resetSourceEditState();
+        }
+        await refreshSelectors();
+        await refreshBindings();
+        await refreshTopology();
+        setFlash(`Source ${id} deleted`);
+      } catch (err) {
+        setFlash(`Source delete failed: ${err.message}`, "danger");
+      }
+    });
+  });
 }
 
 function renderDestinationsTable(destinations) {
@@ -146,6 +250,8 @@ function renderDestinationsTable(destinations) {
       <td>${d.name}</td>
       <td>${d.provider}</td>
       <td>${d.bucket}</td>
+      <td><button class="btn btn-sm btn-outline-secondary edit-destination-row" data-destination-id="${d.id}" type="button">Edit</button></td>
+      <td><button class="btn btn-sm btn-outline-danger delete-destination-row" data-destination-id="${d.id}" type="button">Delete</button></td>
       <td><button class="btn btn-sm btn-outline-secondary test-destination-row" data-destination-id="${d.id}" type="button">Test</button></td>
     `;
     body.appendChild(tr);
@@ -161,6 +267,38 @@ function renderDestinationsTable(destinations) {
         renderValidationCard(container, "Destination Validation", result);
       } catch (err) {
         setFlash(`Destination test failed: ${err.message}`, "danger");
+      }
+    });
+  });
+
+  body.querySelectorAll(".edit-destination-row").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = Number(btn.dataset.destinationId);
+      const destination = destinations.find((item) => item.id === id);
+      if (!destination) {
+        return;
+      }
+      startDestinationEdit(destination);
+    });
+  });
+
+  body.querySelectorAll(".delete-destination-row").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.destinationId);
+      if (!window.confirm(`Delete destination ${id}?`)) {
+        return;
+      }
+      try {
+        await api(`/destinations/${id}`, { method: "DELETE" });
+        if (editingDestinationId === id) {
+          resetDestinationEditState();
+        }
+        await refreshSelectors();
+        await refreshBindings();
+        await refreshTopology();
+        setFlash(`Destination ${id} deleted`);
+      } catch (err) {
+        setFlash(`Destination delete failed: ${err.message}`, "danger");
       }
     });
   });
@@ -451,15 +589,23 @@ async function boot() {
   destinationForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      const f = new FormData(destinationForm);
-      await api("/destinations", {
-        method: "POST",
-        body: JSON.stringify(Object.fromEntries(f.entries())),
-      });
-      destinationForm.reset();
+      const payload = getDestinationPayloadFromForm();
+      if (editingDestinationId) {
+        await api(`/destinations/${editingDestinationId}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        setFlash(`Destination ${editingDestinationId} updated`);
+      } else {
+        await api("/destinations", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        setFlash("Destination saved");
+      }
+      resetDestinationEditState();
       await refreshSelectors();
       await refreshTopology();
-      setFlash("Destination saved");
     } catch (err) {
       setFlash(`Destination save failed: ${err.message}`, "danger");
     }
@@ -469,18 +615,17 @@ async function boot() {
   sourceForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      const f = new FormData(sourceForm);
-      const payload = {
-        name: f.get("name"),
-        source_type: f.get("source_type"),
-        settings: parseJsonOrEmpty(f.get("settings")),
-        is_active: true,
-      };
-      await api("/sources", { method: "POST", body: JSON.stringify(payload) });
-      sourceForm.reset();
+      const payload = getSourcePayloadFromForm();
+      if (editingSourceId) {
+        await api(`/sources/${editingSourceId}`, { method: "PUT", body: JSON.stringify(payload) });
+        setFlash(`Source ${editingSourceId} updated`);
+      } else {
+        await api("/sources", { method: "POST", body: JSON.stringify(payload) });
+        setFlash("Source saved");
+      }
+      resetSourceEditState();
       await refreshSelectors();
       await refreshTopology();
-      setFlash("Source saved");
     } catch (err) {
       setFlash(`Source save failed: ${err.message}`, "danger");
     }
@@ -508,6 +653,14 @@ async function boot() {
 
   document.getElementById("binding-cancel-edit-btn").addEventListener("click", () => {
     resetBindingEditState();
+  });
+
+  document.getElementById("source-cancel-edit-btn").addEventListener("click", () => {
+    resetSourceEditState();
+  });
+
+  document.getElementById("destination-cancel-edit-btn").addEventListener("click", () => {
+    resetDestinationEditState();
   });
 
   document.getElementById("refresh-runs").addEventListener("click", refreshRuns);
