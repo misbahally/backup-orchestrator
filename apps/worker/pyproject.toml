@@ -2,7 +2,7 @@
 name = "backup-worker"
 version = "0.1.0"
 description = "RQ worker for the backup orchestrator"
-authors = ["misbahally <misbahally@example.com>"]
+authors = ["Misbah Ally <2109168+misbahally@users.noreply.github.com>"]
 package-mode = false
 
 [tool.poetry.dependencies]

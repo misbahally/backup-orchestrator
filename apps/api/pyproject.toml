@@ -2,7 +2,7 @@
 name = "backup-api"
 version = "0.1.0"
 description = "FastAPI control plane for the backup orchestrator"
-authors = ["misbahally <misbahally@example.com>"]
+authors = ["Misbah Ally <2109168+misbahally@users.noreply.github.com>"]
 package-mode = false
 
 [tool.poetry.dependencies]
