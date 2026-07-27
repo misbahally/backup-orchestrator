@@ -2,7 +2,7 @@ from datetime import datetime
 
 from database import SessionLocal
 from models import BackupRun, Binding, Destination, RunStatus, Source, SourceType
-from plugins import run_s3_to_s3
+from plugins import run_database_dump_to_s3, run_s3_to_s3
 
 
 def run_backup_job(run_id: int) -> None:
@@ -35,8 +35,17 @@ def run_backup_job(run_id: int) -> None:
         run.message = f"Running {source.source_type.value} backup"
         db.commit()
 
+        transferred = 0
+        copied = 0
+        skipped = 0
         if source.source_type == SourceType.s3:
             summary = run_s3_to_s3(source, destination, binding)
+            transferred = int(summary.get("transferred_bytes", 0))
+            copied = int(summary.get("copied_objects", 0))
+            skipped = int(summary.get("skipped_objects", 0))
+            run.message = f"Completed: copied={copied}, skipped={skipped}"
+        elif source.source_type in {SourceType.mysql, SourceType.postgresql}:
+            summary = run_database_dump_to_s3(source, destination, binding)
             transferred = int(summary.get("transferred_bytes", 0))
             copied = int(summary.get("copied_objects", 0))
             skipped = int(summary.get("skipped_objects", 0))

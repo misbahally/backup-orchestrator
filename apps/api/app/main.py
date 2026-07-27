@@ -111,31 +111,43 @@ def _destination_encryption(binding: Binding, destination: Destination) -> dict[
 
 
 def _validate_source_connection(source: Source) -> dict[str, Any]:
-    if source.source_type.value != "s3":
-        return {"ok": True, "message": f"No connection test implemented for {source.source_type.value}"}
+    source_type = source.source_type.value
+    if source_type == "s3":
+        settings = source.settings or {}
+        bucket = str(settings.get("bucket", "")).strip()
+        if not bucket:
+            raise HTTPException(status_code=400, detail="S3 source requires settings.bucket")
 
-    settings = source.settings or {}
-    bucket = str(settings.get("bucket", "")).strip()
-    if not bucket:
-        raise HTTPException(status_code=400, detail="S3 source requires settings.bucket")
+        _validate_sse_config("source", _source_encryption(source))
 
-    _validate_sse_config("source", _source_encryption(source))
+        client = _make_s3_client(
+            settings.get("region", "us-east-1"),
+            settings.get("endpoint", ""),
+            _load_secret(str(settings.get("secret_ref", ""))),
+        )
 
-    client = _make_s3_client(
-        settings.get("region", "us-east-1"),
-        settings.get("endpoint", ""),
-        _load_secret(str(settings.get("secret_ref", ""))),
-    )
+        try:
+            client.head_bucket(Bucket=bucket)
+        except NoCredentialsError:
+            raise HTTPException(status_code=400, detail="source credentials could not be resolved")
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "")
+            raise HTTPException(status_code=400, detail=f"source validation failed: {code or str(exc)}")
 
-    try:
-        client.head_bucket(Bucket=bucket)
-    except NoCredentialsError:
-        raise HTTPException(status_code=400, detail="source credentials could not be resolved")
-    except ClientError as exc:
-        code = exc.response.get("Error", {}).get("Code", "")
-        raise HTTPException(status_code=400, detail=f"source validation failed: {code or str(exc)}")
+        return {"ok": True, "message": f"Source bucket {bucket} is reachable", "details": {"bucket": bucket, "source_id": source.id}}
 
-    return {"ok": True, "message": f"Source bucket {bucket} is reachable", "details": {"bucket": bucket, "source_id": source.id}}
+    if source_type in {"mysql", "postgresql"}:
+        settings = source.settings or {}
+        missing = [key for key in ("host", "database", "username") if not str(settings.get(key, "")).strip()]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"{source_type} source requires settings.{', settings.'.join(missing)}")
+        return {
+            "ok": True,
+            "message": f"{source_type.title()} source settings look complete",
+            "details": {"source_id": source.id, "engine": source_type, "host": settings.get("host"), "database": settings.get("database")},
+        }
+
+    return {"ok": True, "message": f"No connection test implemented for {source_type}"}
 
 
 def _validate_destination_connection(destination: Destination, binding: Binding | None = None) -> dict[str, Any]:

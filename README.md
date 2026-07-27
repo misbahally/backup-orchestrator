@@ -7,6 +7,10 @@ Service-oriented scaffold for a backup control plane:
 - `apps/web`: Separate frontend that visualizes source -> destination mappings
 - `legacy/`: previous LLM-generated implementation kept for reference only
 
+Each app now has its own Poetry environment:
+- `apps/api/pyproject.toml`
+- `apps/worker/pyproject.toml`
+
 ## Services
 
 - `postgres`: persistent metadata store
@@ -24,13 +28,20 @@ Service-oriented scaffold for a backup control plane:
 cp .env.example .env
 ```
 
-2. Start all services:
+2. Install each service with Poetry using Python 3.11:
+
+```bash
+cd apps/api && poetry env use 3.11 && poetry install --no-root
+cd ../worker && poetry env use 3.11 && poetry install --no-root
+```
+
+3. Start all services:
 
 ```bash
 docker compose up --build
 ```
 
-3. Open:
+4. Open:
 
 - Web UI: `http://localhost:8080`
 - API docs: `http://localhost:8000/docs`

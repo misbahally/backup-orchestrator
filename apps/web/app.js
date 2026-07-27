@@ -122,13 +122,38 @@ function getS3SettingsFromForm() {
   return settings;
 }
 
+function getDatabaseSettingsFromForm() {
+  const f = new FormData(document.getElementById("source-form"));
+  const settings = {};
+  const host = String(f.get("db_host") || "").trim();
+  if (host) settings.host = host;
+  const port = String(f.get("db_port") || "").trim();
+  if (port) settings.port = Number(port);
+  const database = String(f.get("db_database") || "").trim();
+  if (database) settings.database = database;
+  const username = String(f.get("db_username") || "").trim();
+  if (username) settings.username = username;
+  const password = String(f.get("db_password") || "").trim();
+  if (password) settings.password = password;
+  const secretRef = String(f.get("db_secret_ref") || "").trim();
+  if (secretRef) settings.secret_ref = secretRef;
+  return settings;
+}
+
 function getSourcePayloadFromForm() {
   const f = new FormData(document.getElementById("source-form"));
   const sourceType = String(f.get("source_type") || "").trim();
+  let settings = {};
+  if (sourceType === "s3") {
+    settings = getS3SettingsFromForm();
+  } else if (sourceType === "mysql" || sourceType === "postgresql") {
+    settings = getDatabaseSettingsFromForm();
+    settings.engine = sourceType === "postgresql" ? "postgres" : "mysql";
+  }
   return {
     name: f.get("name"),
     source_type: sourceType,
-    settings: sourceType === "s3" ? getS3SettingsFromForm() : {},
+    settings,
     is_active: String(f.get("is_active") || "true").toLowerCase() !== "false",
   };
 }
@@ -174,11 +199,15 @@ function resetBindingEditState() {
   document.getElementById("binding-cancel-edit-btn").classList.add("d-none");
 }
 
-function toggleS3SettingsVisibility() {
+function toggleSourceSettingsVisibility() {
   const form = document.getElementById("source-form");
   const sourceType = String(form.querySelector("[name='source_type']").value || "").trim();
-  const panel = document.getElementById("s3-settings-panel");
-  panel.classList.toggle("d-none", sourceType !== "s3");
+  const s3Panel = document.getElementById("s3-settings-panel");
+  const databasePanel = document.getElementById("database-settings-panel");
+  const showS3 = sourceType === "s3";
+  const showDatabase = sourceType === "mysql" || sourceType === "postgresql";
+  s3Panel.classList.toggle("d-none", !showS3);
+  databasePanel.classList.toggle("d-none", !showDatabase);
 }
 
 function resetSourceEditState() {
@@ -188,7 +217,7 @@ function resetSourceEditState() {
   form.querySelector("[name='is_active']").value = "true";
   form.querySelector("[name='source_type']").value = "s3";
   form.querySelector("[name='s3_region']").value = "us-east-1";
-  toggleS3SettingsVisibility();
+  toggleSourceSettingsVisibility();
   document.getElementById("source-submit-btn").textContent = "Save Source";
   document.getElementById("source-cancel-edit-btn").classList.add("d-none");
 }
@@ -210,7 +239,7 @@ function startSourceEdit(source) {
   form.querySelector("[name='s3_kms_key_arn']").value = encryption.kms_key_arn || "";
   form.querySelector("[name='s3_customer_key_ref']").value = encryption.customer_key_ref || "";
   form.querySelector("[name='is_active']").value = String(Boolean(source.is_active));
-  toggleS3SettingsVisibility();
+  toggleSourceSettingsVisibility();
   document.getElementById("source-submit-btn").textContent = "Save Source";
   document.getElementById("source-cancel-edit-btn").classList.remove("d-none");
 }
@@ -699,8 +728,8 @@ async function boot() {
   });
 
   const sourceForm = document.getElementById("source-form");
-  sourceForm.querySelector("[name='source_type']").addEventListener("change", toggleS3SettingsVisibility);
-  toggleS3SettingsVisibility();
+  sourceForm.querySelector("[name='source_type']").addEventListener("change", toggleSourceSettingsVisibility);
+  toggleSourceSettingsVisibility();
   sourceForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {

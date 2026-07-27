@@ -24,7 +24,16 @@ If you are using the defaults in the compose file, the stack will start with:
 - API on port 8000
 - Web UI on port 8080
 
-## 2. Start the stack
+## 2. Prepare the app environments
+
+Create the app-specific Poetry environments with Python 3.11 before starting the stack:
+
+```bash
+cd apps/api && poetry env use 3.11 && poetry install --no-root
+cd ../worker && poetry env use 3.11 && poetry install --no-root
+```
+
+## 3. Start the stack
 
 ```bash
 docker compose up --build
@@ -36,7 +45,7 @@ After the services are running, open:
 - API docs: http://localhost:8000/docs
 - MinIO Console: http://localhost:9001
 
-## 3. Test with MinIO
+## 4. Test with MinIO
 
 MinIO is useful for local development and smoke testing.
 
@@ -64,7 +73,7 @@ echo "hello" > /tmp/minio-test.txt
 aws --endpoint-url http://localhost:9000 s3 cp /tmp/minio-test.txt s3://backups/minio-test.txt
 ```
 
-## 4. Create your first backup configuration
+## 5. Create your first backup configuration
 
 The workflow is:
 
@@ -75,7 +84,7 @@ The workflow is:
 
 The API endpoints for this workflow are documented in [API usage](./api-usage.md).
 
-## 5. Monitor backup runs
+## 6. Monitor backup runs
 
 You can inspect runs through the API or the web UI. The worker will update run status from queued to running to success or failed.
 

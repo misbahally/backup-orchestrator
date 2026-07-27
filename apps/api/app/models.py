@@ -9,6 +9,8 @@ from .database import Base
 
 class SourceType(str, enum.Enum):
     s3 = "s3"
+    mysql = "mysql"
+    postgresql = "postgresql"
     efs = "efs"
     ebs = "ebs"
     rds = "rds"

@@ -88,6 +88,8 @@
                     <input class="form-control" name="name" placeholder="Source Name" required />
                     <select class="form-select" name="source_type" required>
                       <option value="s3">s3</option>
+                      <option value="mysql">mysql</option>
+                      <option value="postgresql">postgresql</option>
                       <option value="efs">efs</option>
                       <option value="ebs">ebs</option>
                       <option value="rds">rds</option>
@@ -128,6 +130,29 @@
                         </div>
                         <div class="col-12">
                           <input class="form-control form-control-sm" name="s3_customer_key_ref" placeholder="Customer Key Ref" />
+                        </div>
+                      </div>
+                    </div>
+                    <div id="database-settings-panel" class="border rounded p-3 bg-light d-none">
+                      <div class="fw-semibold small mb-2">Database connection details</div>
+                      <div class="row g-2">
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="db_host" placeholder="Host" />
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="db_port" placeholder="Port" />
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="db_database" placeholder="Database" />
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="db_username" placeholder="Username" />
+                        </div>
+                        <div class="col-12">
+                          <input class="form-control form-control-sm" name="db_password" placeholder="Password" />
+                        </div>
+                        <div class="col-12">
+                          <input class="form-control form-control-sm" name="db_secret_ref" placeholder="Secret Ref" />
                         </div>
                       </div>
                     </div>

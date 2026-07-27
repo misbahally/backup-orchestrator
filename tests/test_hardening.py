@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,6 +21,7 @@ from database import engine as worker_engine
 import tasks
 from models import BackupRun, Binding, Destination, RunStatus, Source, SourceType
 from plugins.s3_to_s3 import _upload_extra_args, _customer_key_headers
+from plugins.db_to_s3 import run_database_dump_to_s3
 
 
 @pytest.fixture(autouse=True)
@@ -121,3 +123,50 @@ def test_s3_plugin_encryption_headers_are_explicit():
     headers = _customer_key_headers({"mode": "SSE-C", "customer_key_ref": "env:MY_KEY"})
     assert headers["SSECustomerAlgorithm"] == "AES256"
     assert headers["SSECustomerKey"] == ""
+
+
+def test_database_dump_plugin_uploads_dump_to_destination(monkeypatch):
+    uploaded = {}
+
+    class FakeS3Client:
+        def __init__(self, *args, **kwargs):
+            self.calls = []
+
+        def upload_fileobj(self, fileobj, bucket, key, ExtraArgs=None):
+            uploaded["bucket"] = bucket
+            uploaded["key"] = key
+            uploaded["data"] = fileobj.read()
+
+    class FakeCompletedProcess:
+        def __init__(self):
+            self.returncode = 0
+
+    def fake_run(command, stdout=None, stderr=None, check=False, **kwargs):
+        assert command[0].endswith("mysqldump")
+        stdout.write(b"CREATE TABLE demo;\n")
+        return FakeCompletedProcess()
+
+    monkeypatch.setattr("plugins.db_to_s3._make_s3_client", lambda region, endpoint, creds: FakeS3Client())
+    monkeypatch.setattr("plugins.db_to_s3._load_secret", lambda secret_ref: {})
+    monkeypatch.setattr("plugins.db_to_s3.subprocess.run", fake_run)
+
+    source = SimpleNamespace(
+        settings={
+            "engine": "mysql",
+            "host": "db.internal",
+            "port": 3306,
+            "database": "app",
+            "username": "backup",
+            "password": "secret",
+        },
+    )
+    destination = SimpleNamespace(region="us-east-1", endpoint="", bucket="backups", secret_ref="")
+    binding = SimpleNamespace(policy={})
+
+    summary = run_database_dump_to_s3(source, destination, binding)
+
+    assert summary["copied_objects"] == 1
+    assert summary["transferred_bytes"] == len(b"CREATE TABLE demo;\n")
+    assert uploaded["bucket"] == "backups"
+    assert uploaded["key"].endswith("mysql-app.sql")
+    assert uploaded["data"] == b"CREATE TABLE demo;\n"
