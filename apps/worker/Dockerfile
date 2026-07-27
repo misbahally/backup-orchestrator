@@ -1,10 +1,15 @@
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+ENV POETRY_VIRTUALENVS_CREATE=false \
+    POETRY_NO_INTERACTION=1
+
+RUN pip install --no-cache-dir poetry
+
+COPY pyproject.toml poetry.lock* ./
+RUN poetry install --only main --no-root
 
 COPY . .
 
-CMD ["rq", "worker", "backup-runs", "--url", "redis://redis:6379/0"]
+CMD ["poetry", "run", "rq", "worker", "backup-runs", "--url", "redis://redis:6379/0"]

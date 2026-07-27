@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "backup-api"
+version = "0.1.0"
+description = "FastAPI control plane for the backup orchestrator"
+authors = ["misbahally <misbahally@example.com>"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "0.115.0"
+uvicorn = "0.30.6"
+sqlalchemy = "2.0.35"
+psycopg2-binary = "2.9.12"
+redis = "5.0.8"
+rq = "1.16.2"
+pydantic = "2.10.6"
+pydantic-settings = "2.8.1"
+boto3 = "1.35.30"
+anyio = "4.7.0"
