@@ -96,6 +96,25 @@ def test_run_backup_job_updates_status(monkeypatch):
         db.close()
 
 
+def test_destination_encryption_is_persisted_by_api():
+    client = TestClient(api_app)
+    response = client.post(
+        "/destinations",
+        json={
+            "name": "dest",
+            "provider": "s3-compatible",
+            "endpoint": "https://example.invalid",
+            "bucket": "demo-bucket",
+            "region": "us-east-1",
+            "secret_ref": "env:AWS_SECRET_ACCESS_KEY",
+            "encryption": {"mode": "SSE-KMS", "kms_key_id": "kms-key-123"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["encryption"] == {"mode": "SSE-KMS", "kms_key_id": "kms-key-123"}
+
+
 def test_s3_plugin_encryption_headers_are_explicit():
     assert _upload_extra_args({"mode": "SSE-S3"}) == {"ServerSideEncryption": "AES256"}
 

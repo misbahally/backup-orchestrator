@@ -33,6 +33,7 @@ class Destination(Base):
     bucket: Mapped[str] = mapped_column(String(120), nullable=False)
     region: Mapped[str] = mapped_column(String(80), nullable=False, default="us-east-1")
     secret_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    encryption: Mapped[dict] = mapped_column(JSON, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 

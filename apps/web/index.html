@@ -82,7 +82,7 @@
               <div class="row g-4">
                 <div class="col-lg-5">
                   <h3 class="h5">New Source</h3>
-                  <p class="text-body-secondary small mb-2">For S3 sources, put bucket access and encryption settings in <code>settings</code>. Example: <code>{"bucket":"prod","prefix":"daily","encryption":{"mode":"SSE-C","customer_key_ref":"env:SOURCE_SSE_C_KEY"}}</code></p>
+                  <p class="text-body-secondary small mb-2">Choose the source type and fill in the S3 connection details below.</p>
                   <form id="source-form" class="vstack gap-3">
                     <input type="hidden" name="is_active" value="true" />
                     <input class="form-control" name="name" placeholder="Source Name" required />
@@ -93,7 +93,44 @@
                       <option value="rds">rds</option>
                       <option value="other">other</option>
                     </select>
-                    <textarea class="form-control" name="settings" placeholder='Settings JSON, e.g. {"bucket":"prod","encryption":{"mode":"SSE-S3"}}'></textarea>
+                    <div id="s3-settings-panel" class="border rounded p-3 bg-light d-none">
+                      <div class="fw-semibold small mb-2">S3 connection details</div>
+                      <div class="row g-2">
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="s3_bucket" placeholder="Bucket" />
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="s3_prefix" placeholder="Prefix" />
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="s3_region" placeholder="Region" value="us-east-1" />
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="s3_endpoint" placeholder="Endpoint" />
+                        </div>
+                        <div class="col-12">
+                          <input class="form-control form-control-sm" name="s3_secret_ref" placeholder="Secret Ref" />
+                        </div>
+                        <div class="col-12">
+                          <label class="form-label small mb-1">Encryption</label>
+                          <select class="form-select form-select-sm" name="s3_encryption_mode">
+                            <option value="">None</option>
+                            <option value="SSE-S3">SSE-S3</option>
+                            <option value="SSE-KMS">SSE-KMS</option>
+                            <option value="SSE-C">SSE-C</option>
+                          </select>
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="s3_kms_key_id" placeholder="KMS Key ID" />
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="s3_kms_key_arn" placeholder="KMS Key ARN" />
+                        </div>
+                        <div class="col-12">
+                          <input class="form-control form-control-sm" name="s3_customer_key_ref" placeholder="Customer Key Ref" />
+                        </div>
+                      </div>
+                    </div>
                     <div class="d-flex gap-2 flex-wrap">
                       <button class="btn btn-primary" id="source-submit-btn" type="submit">Save Source</button>
                       <button class="btn btn-outline-secondary d-none" id="source-cancel-edit-btn" type="button">Cancel Edit</button>
@@ -129,15 +166,46 @@
               <div class="row g-4">
                 <div class="col-lg-5">
                   <h3 class="h5">New Destination</h3>
-                  <p class="text-body-secondary small mb-2">Use <code>secret_ref</code> for credentials. Example destination encryption: <code>{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}</code> or <code>{"mode":"SSE-C","customer_key_ref":"env:DEST_SSE_C_KEY"}</code>.</p>
+                  <p class="text-body-secondary small mb-2">Fill in the S3 destination details below. The backend will still send them as normal destination fields.</p>
                   <form id="destination-form" class="vstack gap-3">
                     <input type="hidden" name="is_active" value="true" />
                     <input class="form-control" name="name" placeholder="Destination Name" required />
-                    <input class="form-control" name="provider" placeholder="Provider" value="s3-compatible" required />
-                    <input class="form-control" name="endpoint" placeholder="Endpoint" required />
-                    <input class="form-control" name="bucket" placeholder="Bucket" required />
-                    <input class="form-control" name="region" placeholder="Region" value="us-east-1" required />
-                    <input class="form-control" name="secret_ref" placeholder="Secret Ref" required />
+                    <input class="form-control" name="provider" placeholder="Provider" value="s3-compatible" required readonly style="background-color: #e9ecef;" />
+                    <div class="border rounded p-3 bg-light">
+                      <div class="fw-semibold small mb-2">S3 connection details</div>
+                      <div class="row g-2">
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="endpoint" placeholder="Endpoint" />
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="bucket" placeholder="Bucket" />
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="region" placeholder="Region" value="us-east-1" />
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="secret_ref" placeholder="Secret Ref" />
+                        </div>
+                        <div class="col-12">
+                          <label class="form-label small mb-1">Encryption</label>
+                          <select class="form-select form-select-sm" name="destination_encryption_mode">
+                            <option value="">None</option>
+                            <option value="SSE-S3">SSE-S3</option>
+                            <option value="SSE-KMS">SSE-KMS</option>
+                            <option value="SSE-C">SSE-C</option>
+                          </select>
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="destination_kms_key_id" placeholder="KMS Key ID" />
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="destination_kms_key_arn" placeholder="KMS Key ARN" />
+                        </div>
+                        <div class="col-12">
+                          <input class="form-control form-control-sm" name="destination_customer_key_ref" placeholder="Customer Key Ref" />
+                        </div>
+                      </div>
+                    </div>
                     <div class="d-flex gap-2 flex-wrap">
                       <button class="btn btn-primary" id="destination-submit-btn" type="submit">Save Destination</button>
                       <button class="btn btn-outline-secondary d-none" id="destination-cancel-edit-btn" type="button">Cancel Edit</button>

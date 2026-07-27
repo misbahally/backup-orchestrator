@@ -12,6 +12,7 @@ class DestinationCreate(BaseModel):
     bucket: str
     region: str = "us-east-1"
     secret_ref: str
+    encryption: dict = {}
     is_active: bool = True
 
 

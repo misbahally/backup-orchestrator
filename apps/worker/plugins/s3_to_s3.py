@@ -136,7 +136,10 @@ def run_s3_to_s3(source: Any, destination: Any, binding: Any) -> dict[str, int]:
 
     source_encryption = _normalise_encryption_config(source_settings.get("encryption") or source_settings.get("sse"))
     destination_encryption = _normalise_encryption_config(
-        policy.get("encryption") or policy.get("destination_encryption") or destination.__dict__.get("encryption")
+        policy.get("encryption")
+        or policy.get("destination_encryption")
+        or getattr(destination, "encryption", None)
+        or destination.__dict__.get("encryption")
     )
 
     src_region = source_settings.get("region", "us-east-1")

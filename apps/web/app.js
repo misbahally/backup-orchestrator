@@ -72,19 +72,70 @@ function getBindingPayloadFromForm() {
   };
 }
 
+function getS3SettingsFromForm() {
+  const f = new FormData(document.getElementById("source-form"));
+  const settings = {};
+
+  const bucket = String(f.get("s3_bucket") || "").trim();
+  if (bucket) {
+    settings.bucket = bucket;
+  }
+
+  const prefix = String(f.get("s3_prefix") || "").trim();
+  if (prefix) {
+    settings.prefix = prefix;
+  }
+
+  const region = String(f.get("s3_region") || "").trim();
+  if (region) {
+    settings.region = region;
+  }
+
+  const endpoint = String(f.get("s3_endpoint") || "").trim();
+  if (endpoint) {
+    settings.endpoint = endpoint;
+  }
+
+  const secretRef = String(f.get("s3_secret_ref") || "").trim();
+  if (secretRef) {
+    settings.secret_ref = secretRef;
+  }
+
+  const encryptionMode = String(f.get("s3_encryption_mode") || "").trim();
+  if (encryptionMode) {
+    const encryption = { mode: encryptionMode };
+    const kmsKeyId = String(f.get("s3_kms_key_id") || "").trim();
+    if (kmsKeyId) {
+      encryption.kms_key_id = kmsKeyId;
+    }
+    const kmsKeyArn = String(f.get("s3_kms_key_arn") || "").trim();
+    if (kmsKeyArn) {
+      encryption.kms_key_arn = kmsKeyArn;
+    }
+    const customerKeyRef = String(f.get("s3_customer_key_ref") || "").trim();
+    if (customerKeyRef) {
+      encryption.customer_key_ref = customerKeyRef;
+    }
+    settings.encryption = encryption;
+  }
+
+  return settings;
+}
+
 function getSourcePayloadFromForm() {
   const f = new FormData(document.getElementById("source-form"));
+  const sourceType = String(f.get("source_type") || "").trim();
   return {
     name: f.get("name"),
-    source_type: f.get("source_type"),
-    settings: parseJsonOrEmpty(f.get("settings")),
+    source_type: sourceType,
+    settings: sourceType === "s3" ? getS3SettingsFromForm() : {},
     is_active: String(f.get("is_active") || "true").toLowerCase() !== "false",
   };
 }
 
 function getDestinationPayloadFromForm() {
   const f = new FormData(document.getElementById("destination-form"));
-  return {
+  const payload = {
     name: f.get("name"),
     provider: f.get("provider"),
     endpoint: f.get("endpoint"),
@@ -93,6 +144,26 @@ function getDestinationPayloadFromForm() {
     secret_ref: f.get("secret_ref"),
     is_active: String(f.get("is_active") || "true").toLowerCase() !== "false",
   };
+
+  const encryptionMode = String(f.get("destination_encryption_mode") || "").trim();
+  if (encryptionMode) {
+    const encryption = { mode: encryptionMode };
+    const kmsKeyId = String(f.get("destination_kms_key_id") || "").trim();
+    if (kmsKeyId) {
+      encryption.kms_key_id = kmsKeyId;
+    }
+    const kmsKeyArn = String(f.get("destination_kms_key_arn") || "").trim();
+    if (kmsKeyArn) {
+      encryption.kms_key_arn = kmsKeyArn;
+    }
+    const customerKeyRef = String(f.get("destination_customer_key_ref") || "").trim();
+    if (customerKeyRef) {
+      encryption.customer_key_ref = customerKeyRef;
+    }
+    payload.encryption = encryption;
+  }
+
+  return payload;
 }
 
 function resetBindingEditState() {
@@ -103,11 +174,21 @@ function resetBindingEditState() {
   document.getElementById("binding-cancel-edit-btn").classList.add("d-none");
 }
 
+function toggleS3SettingsVisibility() {
+  const form = document.getElementById("source-form");
+  const sourceType = String(form.querySelector("[name='source_type']").value || "").trim();
+  const panel = document.getElementById("s3-settings-panel");
+  panel.classList.toggle("d-none", sourceType !== "s3");
+}
+
 function resetSourceEditState() {
   editingSourceId = null;
   const form = document.getElementById("source-form");
   form.reset();
   form.querySelector("[name='is_active']").value = "true";
+  form.querySelector("[name='source_type']").value = "s3";
+  form.querySelector("[name='s3_region']").value = "us-east-1";
+  toggleS3SettingsVisibility();
   document.getElementById("source-submit-btn").textContent = "Save Source";
   document.getElementById("source-cancel-edit-btn").classList.add("d-none");
 }
@@ -115,10 +196,21 @@ function resetSourceEditState() {
 function startSourceEdit(source) {
   editingSourceId = source.id;
   const form = document.getElementById("source-form");
+  const settings = source.settings || {};
+  const encryption = settings.encryption || settings.sse || {};
   form.querySelector("[name='name']").value = source.name;
   form.querySelector("[name='source_type']").value = source.source_type;
-  form.querySelector("[name='settings']").value = JSON.stringify(source.settings || {}, null, 2);
+  form.querySelector("[name='s3_bucket']").value = settings.bucket || "";
+  form.querySelector("[name='s3_prefix']").value = settings.prefix || "";
+  form.querySelector("[name='s3_region']").value = settings.region || "us-east-1";
+  form.querySelector("[name='s3_endpoint']").value = settings.endpoint || "";
+  form.querySelector("[name='s3_secret_ref']").value = settings.secret_ref || "";
+  form.querySelector("[name='s3_encryption_mode']").value = encryption.mode || "";
+  form.querySelector("[name='s3_kms_key_id']").value = encryption.kms_key_id || "";
+  form.querySelector("[name='s3_kms_key_arn']").value = encryption.kms_key_arn || "";
+  form.querySelector("[name='s3_customer_key_ref']").value = encryption.customer_key_ref || "";
   form.querySelector("[name='is_active']").value = String(Boolean(source.is_active));
+  toggleS3SettingsVisibility();
   document.getElementById("source-submit-btn").textContent = "Save Source";
   document.getElementById("source-cancel-edit-btn").classList.remove("d-none");
 }
@@ -534,13 +626,8 @@ async function boot() {
 
   document.getElementById("test-source-btn").addEventListener("click", async () => {
     try {
-      const f = new FormData(document.getElementById("source-form"));
-      const payload = {
-        name: f.get("name"),
-        source_type: f.get("source_type"),
-        settings: parseJsonOrEmpty(f.get("settings")),
-        is_active: true,
-      };
+      const payload = getSourcePayloadFromForm();
+      payload.is_active = true;
       const result = await api("/validate/source", { method: "POST", body: JSON.stringify(payload) });
       setFlash(result.message || "Source validated");
       const container = document.getElementById("validation-results");
@@ -612,6 +699,8 @@ async function boot() {
   });
 
   const sourceForm = document.getElementById("source-form");
+  sourceForm.querySelector("[name='source_type']").addEventListener("change", toggleS3SettingsVisibility);
+  toggleS3SettingsVisibility();
   sourceForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
