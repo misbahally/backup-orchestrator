@@ -1,4 +1,4 @@
-FROM python:3.14.0-slim AS builder
+FROM python:3.13-slim AS builder
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -18,13 +18,13 @@ RUN apt-get update \
 
 RUN curl -sSL https://install.python-poetry.org | python3 -
 
-COPY apps/worker/pyproject.toml apps/worker/poetry.lock ./
+COPY apps/worker/pyproject.toml ./
 COPY libs/orchestrator_core /libs/orchestrator_core
-RUN poetry install --no-root --only main
+RUN poetry lock && poetry install --no-root --only main
 
 COPY apps/worker/ .
 
-FROM python:3.14.0-slim AS runtime
+FROM python:3.13-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

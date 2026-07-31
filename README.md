@@ -28,11 +28,11 @@ Each app now has its own Poetry environment:
 cp .env.example .env
 ```
 
-2. Install each service with Poetry using Python 3.11:
+2. Install each service with Poetry using Python 3.13:
 
 ```bash
-cd apps/api && poetry env use 3.11 && poetry install --no-root
-cd ../worker && poetry env use 3.11 && poetry install --no-root
+cd apps/api && poetry env use 3.13 && poetry install --no-root
+cd ../worker && poetry env use 3.13 && poetry install --no-root
 ```
 
 3. Start all services:

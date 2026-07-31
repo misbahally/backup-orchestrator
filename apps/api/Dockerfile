@@ -1,4 +1,6 @@
-FROM python:3.14.0-slim AS builder
+# syntax=docker/dockerfile:1.7
+
+FROM python:3.13-slim AS builder
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -18,15 +20,15 @@ RUN apt-get update \
 
 RUN curl -sSL https://install.python-poetry.org | python3 -
 
-COPY apps/api/pyproject.toml apps/api/poetry.lock ./
+COPY apps/api/pyproject.toml ./
 COPY libs/orchestrator_core /libs/orchestrator_core
-RUN poetry install --no-root --only main
+RUN poetry lock && poetry install --no-root --only main
 
 COPY apps/api/app ./app
 COPY apps/api/alembic ./alembic
 COPY apps/api/alembic.ini ./alembic.ini
 
-FROM python:3.14.0-slim AS runtime
+FROM python:3.13-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

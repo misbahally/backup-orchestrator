@@ -6,7 +6,7 @@ authors = ["Misbah Ally <2109168+misbahally@users.noreply.github.com>"]
 package-mode = true
 
 [tool.poetry.dependencies]
-python = ">=3.14,<3.15"
+python = ">=3.13,<3.14"
 sqlalchemy = "2.0.35"
 
 [build-system]

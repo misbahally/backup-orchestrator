@@ -31,11 +31,11 @@ Set these important variables in `.env` before startup:
 
 ## 2. Prepare the app environments
 
-Create the app-specific Poetry environments with Python 3.11 before starting the stack:
+Create the app-specific Poetry environments with Python 3.13 before starting the stack:
 
 ```bash
-cd apps/api && poetry env use 3.11 && poetry install --no-root
-cd ../worker && poetry env use 3.11 && poetry install --no-root
+cd apps/api && poetry env use 3.13 && poetry install --no-root
+cd ../worker && poetry env use 3.13 && poetry install --no-root
 ```
 
 ## 3. Start the stack

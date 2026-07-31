@@ -6,7 +6,7 @@ This directory contains operational guides for the backup control plane.
 
 The backup orchestrator is a Docker-based control plane for defining backup sources, destinations, and bindings, then executing backup runs through a worker queue.
 
-The API and worker services each use their own Poetry environment under [apps/api](../apps/api) and [apps/worker](../apps/worker), both targeting Python 3.11 for compatibility with the current dependency stack.
+The API and worker services each use their own Poetry environment under [apps/api](../apps/api) and [apps/worker](../apps/worker), both targeting Python 3.13 for compatibility with the current dependency stack.
 
 ## Documentation map
 
