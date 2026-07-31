@@ -104,7 +104,3 @@ This scaffold provides:
 - `sources`: backup source definitions (S3/MySQL/PostgreSQL/File/EBS/RDS)
 - `bindings`: source to destination configuration and schedule
 - `backup_runs`: run history and status
-
-## Legacy Code
-
-Previous code is preserved in `legacy/` and is not used by the new stack.
