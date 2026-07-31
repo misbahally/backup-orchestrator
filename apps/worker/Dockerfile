@@ -1,4 +1,4 @@
-FROM python:3.14-slim AS builder
+FROM python:3.14.0-slim AS builder
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -18,12 +18,13 @@ RUN apt-get update \
 
 RUN curl -sSL https://install.python-poetry.org | python3 -
 
-COPY pyproject.toml poetry.lock ./
+COPY apps/worker/pyproject.toml apps/worker/poetry.lock ./
+COPY libs/orchestrator_core /libs/orchestrator_core
 RUN poetry install --no-root --only main
 
-COPY . .
+COPY apps/worker/ .
 
-FROM python:3.14-slim AS runtime
+FROM python:3.14.0-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -31,6 +32,10 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client default-mysql-client gzip procps \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN addgroup --system --gid 10001 appgroup \
     && adduser --system --uid 10001 --ingroup appgroup appuser
@@ -40,4 +45,4 @@ COPY --from=builder --chown=10001:10001 /app .
 
 USER 10001:10001
 
-CMD ["rq", "worker", "backup-runs", "--url", "redis://redis:6379/0"]
+CMD ["python", "worker_main.py"]

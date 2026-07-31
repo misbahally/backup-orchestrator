@@ -1,4 +1,4 @@
-FROM python:3.14-slim AS builder
+FROM python:3.14.0-slim AS builder
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -18,12 +18,15 @@ RUN apt-get update \
 
 RUN curl -sSL https://install.python-poetry.org | python3 -
 
-COPY pyproject.toml poetry.lock ./
+COPY apps/api/pyproject.toml apps/api/poetry.lock ./
+COPY libs/orchestrator_core /libs/orchestrator_core
 RUN poetry install --no-root --only main
 
-COPY app ./app
+COPY apps/api/app ./app
+COPY apps/api/alembic ./alembic
+COPY apps/api/alembic.ini ./alembic.ini
 
-FROM python:3.14-slim AS runtime
+FROM python:3.14.0-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -38,6 +41,8 @@ RUN addgroup --system --gid 10001 appgroup \
 
 COPY --from=builder --chown=10001:10001 /app/.venv ./.venv
 COPY --from=builder --chown=10001:10001 /app/app ./app
+COPY --from=builder --chown=10001:10001 /app/alembic ./alembic
+COPY --from=builder --chown=10001:10001 /app/alembic.ini ./alembic.ini
 
 USER 10001:10001
 

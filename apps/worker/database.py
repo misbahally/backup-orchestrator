@@ -1,15 +1,11 @@
 import os
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from orchestrator_core.database import build_engine, build_session_local
+from orchestrator_core.models import Base
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", "postgresql+psycopg2://backup:backup@postgres:5432/backup_control"
 )
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
-
-class Base(DeclarativeBase):
-    pass
+engine = build_engine(DATABASE_URL)
+SessionLocal = build_session_local(engine)

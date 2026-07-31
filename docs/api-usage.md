@@ -16,6 +16,12 @@ The interactive Swagger UI is available at:
 http://localhost:8000/docs
 ```
 
+If `API_KEYS` is set, include the header below in every request:
+
+```text
+X-API-Key: <your-key>
+```
+
 ## Health check
 
 ```bash
@@ -30,11 +36,13 @@ Example response:
 
 ## Create a source
 
-The source represents the backup origin. The current implementation supports S3-compatible sources.
+The source represents the backup origin. The current implementation supports `s3`,
+`mysql`, `postgresql`, `file`, `ebs`, and `rds`.
 
 ```bash
 curl -X POST http://localhost:8000/sources \
   -H 'Content-Type: application/json' \
+  -H 'X-API-Key: dev-key' \
   -d '{
     "name": "my-source",
     "source_type": "s3",
@@ -48,11 +56,32 @@ curl -X POST http://localhost:8000/sources \
   }'
 ```
 
+## Create a file source
+
+```bash
+curl -X POST http://localhost:8000/sources \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: dev-key' \
+  -d '{
+    "name": "local-files",
+    "source_type": "file",
+    "settings": {
+      "root_path": "/data",
+      "include_globs": ["**/*.sql", "**/*.gz"],
+      "exclude_globs": ["**/*.tmp"],
+      "follow_symlinks": false,
+      "key_prefix": "file/local-files"
+    },
+    "is_active": true
+  }'
+```
+
 ## Create a destination
 
 ```bash
 curl -X POST http://localhost:8000/destinations \
   -H 'Content-Type: application/json' \
+  -H 'X-API-Key: dev-key' \
   -d '{
     "name": "my-destination",
     "provider": "s3-compatible",
@@ -72,6 +101,7 @@ A binding connects a source to a destination and defines the schedule.
 ```bash
 curl -X POST http://localhost:8000/bindings \
   -H 'Content-Type: application/json' \
+  -H 'X-API-Key: dev-key' \
   -d '{
     "source_id": 1,
     "destination_id": 1,
@@ -86,28 +116,28 @@ curl -X POST http://localhost:8000/bindings \
 You can validate a source, destination, or binding before triggering a run.
 
 ```bash
-curl http://localhost:8000/validate/source/1
-curl http://localhost:8000/validate/destination/1
-curl http://localhost:8000/validate/binding/1
+curl -H 'X-API-Key: dev-key' http://localhost:8000/validate/source/1
+curl -H 'X-API-Key: dev-key' http://localhost:8000/validate/destination/1
+curl -H 'X-API-Key: dev-key' http://localhost:8000/validate/binding/1
 ```
 
 ## Trigger a run
 
 ```bash
-curl -X POST http://localhost:8000/runs/trigger/1
+curl -X POST -H 'X-API-Key: dev-key' http://localhost:8000/runs/trigger/1
 ```
 
 ## List and inspect runs
 
 ```bash
-curl http://localhost:8000/runs
-curl http://localhost:8000/runs/1
+curl -H 'X-API-Key: dev-key' http://localhost:8000/runs
+curl -H 'X-API-Key: dev-key' http://localhost:8000/runs/1
 ```
 
 ## Cancel a run
 
 ```bash
-curl -X POST http://localhost:8000/runs/1/cancel
+curl -X POST -H 'X-API-Key: dev-key' http://localhost:8000/runs/1/cancel
 ```
 
 ## Topology view
@@ -115,11 +145,18 @@ curl -X POST http://localhost:8000/runs/1/cancel
 The topology endpoint returns nodes and edges for the web UI.
 
 ```bash
-curl http://localhost:8000/topology
+curl -H 'X-API-Key: dev-key' http://localhost:8000/topology
+
+## Metrics
+
+```bash
+curl http://localhost:8000/metrics
+```
 ```
 
 ## Notes
 
-- The current worker implementation focuses on S3-to-S3 backup jobs.
-- Other source types such as EFS, EBS, and RDS are defined in the schema but are not fully implemented yet.
+- EFS and `other` are no longer valid source types.
+- EBS and RDS are temporarily disabled and return HTTP 503 when used.
+- For EFS workloads, mount EFS into the worker and use a `file` source.
 - Secrets are resolved through the shared secret resolution helper used by both the API and worker.

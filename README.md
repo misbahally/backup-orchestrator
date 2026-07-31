@@ -90,14 +90,15 @@ This scaffold provides:
 - Topology visualization in a separate frontend service
 - Shared secret resolution for API and worker
 - Structured validation diagnostics and run detail inspection
-- Scheduler entry point for active bindings
-
-It intentionally does **not** yet implement cloud-specific backup logic; that will be added as source plugins in the worker.
+- Cron-aware scheduler entry point for active bindings
+- API key authentication support
+- Prometheus metrics endpoints for API/worker/scheduler
+- Source plugins for S3 copy, MySQL/PostgreSQL logical dump, filesystem copy, EBS snapshots, and RDS snapshots
 
 ## High-Level Data Model
 
 - `destinations`: S3-compatible destination definitions
-- `sources`: backup source definitions (S3/EFS/EBS/RDS/other)
+- `sources`: backup source definitions (S3/MySQL/PostgreSQL/File/EBS/RDS)
 - `bindings`: source to destination configuration and schedule
 - `backup_runs`: run history and status
 

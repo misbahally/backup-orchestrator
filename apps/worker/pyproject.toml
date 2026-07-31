@@ -13,3 +13,6 @@ redis = "5.0.8"
 rq = "1.16.2"
 boto3 = "1.35.30"
 anyio = "4.7.0"
+croniter = "2.0.7"
+prometheus-client = "0.21.1"
+orchestrator-core = { path = "../../libs/orchestrator_core" }

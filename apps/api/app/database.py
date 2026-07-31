@@ -1,15 +1,11 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from orchestrator_core.database import build_engine, build_session_local
+from orchestrator_core.models import Base
 
 from .config import settings
 
 
-engine = create_engine(settings.database_url, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
-
-class Base(DeclarativeBase):
-    pass
+engine = build_engine(settings.database_url)
+SessionLocal = build_session_local(engine)
 
 
 def get_db():

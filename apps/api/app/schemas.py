@@ -64,6 +64,9 @@ class RunRead(BaseModel):
     finished_at: datetime | None = None
     bytes_transferred: int
     message: str
+    attempts: int = 0
+    max_attempts: int = 0
+    artifact_ref: str = ""
 
     class Config:
         from_attributes = True

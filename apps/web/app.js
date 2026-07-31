@@ -1,13 +1,24 @@
-const API_BASE = localStorage.getItem("api_base_url") || "http://localhost:8000";
+const API_BASE = localStorage.getItem("api_base_url") || "/api";
 let editingBindingId = null;
 let editingSourceId = null;
 let editingDestinationId = null;
 
 async function api(path, options = {}) {
+  const apiKey = localStorage.getItem("api_key") || "";
+  const headers = { "Content-Type": "application/json" };
+  if (apiKey) {
+    headers["X-API-Key"] = apiKey;
+  }
   const resp = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...options,
   });
+  if (resp.status === 401) {
+    const token = window.prompt("Enter API key", apiKey);
+    if (token !== null) {
+      localStorage.setItem("api_key", token.trim());
+    }
+  }
   if (!resp.ok) {
     const txt = await resp.text();
     throw new Error(txt || `HTTP ${resp.status}`);
@@ -140,6 +151,21 @@ function getDatabaseSettingsFromForm() {
   return settings;
 }
 
+function getFileSettingsFromForm() {
+  const f = new FormData(document.getElementById("source-form"));
+  const settings = {};
+  const rootPath = String(f.get("file_root_path") || "").trim();
+  if (rootPath) settings.root_path = rootPath;
+  const includeRaw = String(f.get("file_include_globs") || "").trim();
+  if (includeRaw) settings.include_globs = includeRaw.split(",").map((x) => x.trim()).filter(Boolean);
+  const excludeRaw = String(f.get("file_exclude_globs") || "").trim();
+  if (excludeRaw) settings.exclude_globs = excludeRaw.split(",").map((x) => x.trim()).filter(Boolean);
+  settings.follow_symlinks = String(f.get("file_follow_symlinks") || "false").toLowerCase() === "true";
+  const keyPrefix = String(f.get("file_key_prefix") || "").trim();
+  if (keyPrefix) settings.key_prefix = keyPrefix;
+  return settings;
+}
+
 function getSourcePayloadFromForm() {
   const f = new FormData(document.getElementById("source-form"));
   const sourceType = String(f.get("source_type") || "").trim();
@@ -149,6 +175,8 @@ function getSourcePayloadFromForm() {
   } else if (sourceType === "mysql" || sourceType === "postgresql") {
     settings = getDatabaseSettingsFromForm();
     settings.engine = sourceType === "postgresql" ? "postgres" : "mysql";
+  } else if (sourceType === "file") {
+    settings = getFileSettingsFromForm();
   }
   return {
     name: f.get("name"),
@@ -204,10 +232,13 @@ function toggleSourceSettingsVisibility() {
   const sourceType = String(form.querySelector("[name='source_type']").value || "").trim();
   const s3Panel = document.getElementById("s3-settings-panel");
   const databasePanel = document.getElementById("database-settings-panel");
+  const filePanel = document.getElementById("file-settings-panel");
   const showS3 = sourceType === "s3";
   const showDatabase = sourceType === "mysql" || sourceType === "postgresql";
+  const showFile = sourceType === "file";
   s3Panel.classList.toggle("d-none", !showS3);
   databasePanel.classList.toggle("d-none", !showDatabase);
+  filePanel.classList.toggle("d-none", !showFile);
 }
 
 function resetSourceEditState() {
@@ -238,6 +269,11 @@ function startSourceEdit(source) {
   form.querySelector("[name='s3_kms_key_id']").value = encryption.kms_key_id || "";
   form.querySelector("[name='s3_kms_key_arn']").value = encryption.kms_key_arn || "";
   form.querySelector("[name='s3_customer_key_ref']").value = encryption.customer_key_ref || "";
+  form.querySelector("[name='file_root_path']").value = settings.root_path || "";
+  form.querySelector("[name='file_include_globs']").value = (settings.include_globs || []).join(", ");
+  form.querySelector("[name='file_exclude_globs']").value = (settings.exclude_globs || []).join(", ");
+  form.querySelector("[name='file_follow_symlinks']").value = String(Boolean(settings.follow_symlinks));
+  form.querySelector("[name='file_key_prefix']").value = settings.key_prefix || "";
   form.querySelector("[name='is_active']").value = String(Boolean(source.is_active));
   toggleSourceSettingsVisibility();
   document.getElementById("source-submit-btn").textContent = "Save Source";
@@ -816,6 +852,17 @@ async function boot() {
   await refreshBindings();
   await refreshTopology();
   await refreshRuns();
+
+  window.setInterval(async () => {
+    if (document.visibilityState !== "visible") {
+      return;
+    }
+    const operationsView = document.getElementById("operations-view");
+    if (!operationsView.classList.contains("d-none")) {
+      await refreshRuns();
+      await refreshTopology();
+    }
+  }, 10000);
 }
 
 boot().catch((err) => {

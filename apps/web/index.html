@@ -90,10 +90,7 @@
                       <option value="s3">s3</option>
                       <option value="mysql">mysql</option>
                       <option value="postgresql">postgresql</option>
-                      <option value="efs">efs</option>
-                      <option value="ebs">ebs</option>
-                      <option value="rds">rds</option>
-                      <option value="other">other</option>
+                      <option value="file">file</option>
                     </select>
                     <div id="s3-settings-panel" class="border rounded p-3 bg-light d-none">
                       <div class="fw-semibold small mb-2">S3 connection details</div>
@@ -153,6 +150,29 @@
                         </div>
                         <div class="col-12">
                           <input class="form-control form-control-sm" name="db_secret_ref" placeholder="Secret Ref" />
+                        </div>
+                      </div>
+                    </div>
+                    <div id="file-settings-panel" class="border rounded p-3 bg-light d-none">
+                      <div class="fw-semibold small mb-2">Filesystem source details</div>
+                      <div class="row g-2">
+                        <div class="col-12">
+                          <input class="form-control form-control-sm" name="file_root_path" placeholder="Root path inside worker container (e.g. /data)" />
+                        </div>
+                        <div class="col-12">
+                          <input class="form-control form-control-sm" name="file_include_globs" placeholder="Include globs (comma separated), e.g. **/*.sql, **/*.gz" />
+                        </div>
+                        <div class="col-12">
+                          <input class="form-control form-control-sm" name="file_exclude_globs" placeholder="Exclude globs (comma separated), e.g. **/*.tmp" />
+                        </div>
+                        <div class="col-md-6">
+                          <select class="form-select form-select-sm" name="file_follow_symlinks">
+                            <option value="false">Do not follow symlinks</option>
+                            <option value="true">Follow symlinks</option>
+                          </select>
+                        </div>
+                        <div class="col-md-6">
+                          <input class="form-control form-control-sm" name="file_key_prefix" placeholder="S3 key prefix (optional)" />
                         </div>
                       </div>
                     </div>

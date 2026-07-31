@@ -1,18 +1,16 @@
 import io
 import os
 import subprocess
-import tempfile
 from typing import Any
 
-from secret_resolver import resolve_secret_mapping, resolve_secret_text
+from boto3.s3.transfer import TransferConfig
+
+from plugins.s3_to_s3 import _normalise_encryption_config, _upload_extra_args
+from secret_resolver import resolve_secret_mapping
 
 
 def _load_secret(secret_ref: str) -> dict[str, str]:
     return resolve_secret_mapping(secret_ref)
-
-
-def _load_text_secret(secret_ref: str) -> str:
-    return resolve_secret_text(secret_ref)
 
 
 def _make_s3_client(region: str, endpoint: str, creds: dict[str, str]) -> Any:
@@ -38,14 +36,14 @@ def _normalise_engine_name(source: Any) -> str:
     return engine
 
 
-def _build_dump_command(source: Any) -> list[str]:
-    settings = source.settings or {}
+def _build_dump_command(source: Any) -> tuple[list[str], dict[str, str]]:
+    source_settings = source.settings or {}
     engine = _normalise_engine_name(source)
-    host = str(settings.get("host", "")).strip()
-    port = str(settings.get("port", "")).strip()
-    database = str(settings.get("database", "")).strip()
-    username = str(settings.get("username", "")).strip()
-    password = str(settings.get("password", "") or settings.get("secret", "")).strip()
+    host = str(source_settings.get("host", "")).strip()
+    port = str(source_settings.get("port", "")).strip()
+    database = str(source_settings.get("database", "")).strip()
+    username = str(source_settings.get("username", "")).strip()
+    password = str(source_settings.get("password", "") or source_settings.get("secret", "")).strip()
 
     if not database:
         raise ValueError("Database source requires settings.database")
@@ -58,9 +56,7 @@ def _build_dump_command(source: Any) -> list[str]:
             command.extend(["-h", host])
         if port:
             command.extend(["-p", port])
-        if username:
-            command.extend(["-U", username])
-        command.append(database)
+        command.extend(["-U", username, database])
         env = os.environ.copy()
         if password:
             env["PGPASSWORD"] = password
@@ -72,52 +68,97 @@ def _build_dump_command(source: Any) -> list[str]:
             command.extend(["--host", host])
         if port:
             command.extend(["--port", port])
-        if username:
-            command.extend(["--user", username])
+        command.extend(["--user", username])
         if password:
-            command.extend(["--password=" + password])
+            command.append("--password=" + password)
         command.append(database)
         return command, os.environ.copy()
 
     raise ValueError(f"Unsupported database engine '{engine}'")
 
 
+class _CallbackCounter:
+    def __init__(self) -> None:
+        self.total = 0
+
+    def __call__(self, bytes_amount: int) -> None:
+        self.total += int(bytes_amount)
+
+
 def run_database_dump_to_s3(source: Any, destination: Any, binding: Any) -> dict[str, int]:
-    """Create a logical dump from a MySQL/PostgreSQL source and upload it to S3-compatible storage."""
-    settings = source.settings or {}
+    source_settings = source.settings or {}
     policy = binding.policy or {}
     engine = _normalise_engine_name(source)
     if engine not in {"mysql", "postgres"}:
         raise ValueError(f"Unsupported database engine '{engine}'")
 
+    compress = bool(source_settings.get("compress", True))
+    source_database = str(source_settings.get("database", "")).strip()
+    filename = f"{engine}-{source_database}.sql.gz" if compress else f"{engine}-{source_database}.sql"
     dest_prefix = str(policy.get("dest_prefix", "")).strip().strip("/")
-    filename = f"{engine}-{str(settings.get('database','')).strip()}.sql"
-    if dest_prefix:
-        key = f"{dest_prefix}/{filename}"
-    else:
-        key = filename
+    key = f"{dest_prefix}/{filename}" if dest_prefix else filename
 
-    src_region = str(settings.get("region", destination.region or "us-east-1")).strip() or "us-east-1"
-    src_endpoint = str(settings.get("endpoint", "")).strip()
-    src_secret = _load_secret(str(settings.get("secret_ref", "")))
-    dst_secret = _load_secret(destination.secret_ref)
+    source_region = str(source_settings.get("region", destination.region or "us-east-1")).strip() or "us-east-1"
+    source_endpoint = str(source_settings.get("endpoint", "")).strip()
+    source_creds = _load_secret(str(source_settings.get("secret_ref", "")))
+    destination_creds = _load_secret(destination.secret_ref)
 
-    client = _make_s3_client(src_region, src_endpoint, src_secret)
-    if not hasattr(client, "upload_fileobj"):
-        raise ValueError("Configured destination does not support upload_fileobj")
+    _ = _make_s3_client(source_region, source_endpoint, source_creds)
+    destination_client = _make_s3_client(destination.region or "us-east-1", destination.endpoint or "", destination_creds)
 
-    dump_bytes = io.BytesIO()
-    with tempfile.TemporaryFile() as handle:
-        command, env = _build_dump_command(source)
-        completed = subprocess.run(command, stdout=handle, stderr=subprocess.PIPE, check=False, env=env)
-        handle.seek(0)
-        dump_bytes.write(handle.read())
-    if completed.returncode != 0:
-        raise RuntimeError(f"Database dump failed for {engine}: {completed.stderr.decode('utf-8', errors='replace').strip()}")
+    command, env = _build_dump_command(source)
+    dump_proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    gzip_proc: subprocess.Popen[bytes] | None = None
+    stream = dump_proc.stdout
 
-    dump_bytes.seek(0)
-    dst = _make_s3_client(destination.region or "us-east-1", destination.endpoint or "", dst_secret)
-    dst.upload_fileobj(dump_bytes, destination.bucket, key)
+    if stream is None:
+        raise RuntimeError("Dump command did not expose stdout")
 
-    transferred_bytes = len(dump_bytes.getvalue())
-    return {"copied_objects": 1, "skipped_objects": 0, "transferred_bytes": transferred_bytes}
+    try:
+        if compress:
+            gzip_proc = subprocess.Popen(["gzip", "-c"], stdin=stream, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stream = gzip_proc.stdout
+            if stream is None:
+                raise RuntimeError("gzip command did not expose stdout")
+
+        counter = _CallbackCounter()
+        transfer_config = TransferConfig(multipart_threshold=64 * 1024 * 1024, multipart_chunksize=64 * 1024 * 1024)
+        extra_args = _upload_extra_args(_normalise_encryption_config(policy.get("encryption") or destination.encryption or {}))
+        upload_kwargs: dict[str, Any] = {"Config": transfer_config, "Callback": counter}
+        if extra_args:
+            upload_kwargs["ExtraArgs"] = extra_args
+
+        destination_client.upload_fileobj(stream, destination.bucket, key, **upload_kwargs)
+    except Exception:
+        try:
+            destination_client.delete_object(Bucket=destination.bucket, Key=key)
+        except Exception:
+            pass
+        raise
+    finally:
+        if dump_proc.stdout:
+            dump_proc.stdout.close()
+        if gzip_proc and gzip_proc.stdout:
+            gzip_proc.stdout.close()
+
+    dump_stderr = b""
+    gzip_stderr = b""
+    if dump_proc.stderr:
+        dump_stderr = dump_proc.stderr.read()
+    dump_rc = dump_proc.wait()
+
+    if gzip_proc:
+        if gzip_proc.stderr:
+            gzip_stderr = gzip_proc.stderr.read()
+        gzip_rc = gzip_proc.wait()
+        if gzip_rc != 0:
+            destination_client.delete_object(Bucket=destination.bucket, Key=key)
+            msg = gzip_stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"gzip failed: {msg or 'non-zero exit'}")
+
+    if dump_rc != 0:
+        destination_client.delete_object(Bucket=destination.bucket, Key=key)
+        msg = dump_stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"Database dump failed for {engine}: {msg or 'non-zero exit'}")
+
+    return {"copied_objects": 1, "skipped_objects": 0, "transferred_bytes": counter.total}

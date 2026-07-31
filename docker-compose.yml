@@ -32,9 +32,24 @@ services:
     volumes:
       - minio_data:/data
 
+  migrate:
+    build:
+      context: .
+      dockerfile: ./apps/api/Dockerfile
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://backup:backup@postgres:5432/backup_control}
+    command: ["alembic", "-c", "/app/alembic.ini", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build:
-      context: ./apps/api
+      context: .
+      dockerfile: ./apps/api/Dockerfile
     env_file:
       - .env
     environment:
@@ -43,10 +58,27 @@ services:
       API_HOST: ${API_HOST:-0.0.0.0}
       API_PORT: ${API_PORT:-8000}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      API_KEYS: ${API_KEYS:-}
+      EXPOSE_DOCS: ${EXPOSE_DOCS:-true}
+      MAX_RETRIES: ${MAX_RETRIES:-3}
+      RQ_JOB_TIMEOUT: ${RQ_JOB_TIMEOUT:-2h}
+      FILE_SOURCE_ALLOWED_ROOTS: ${FILE_SOURCE_ALLOWED_ROOTS:-/data:/mnt/backups}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "8000:8000"
-    restart: on-failure
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    mem_limit: 512m
+    cpus: 1.0
+    volumes:
+      - ./data:/data:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -54,14 +86,32 @@ services:
 
   worker:
     build:
-      context: ./apps/worker
+      context: .
+      dockerfile: ./apps/worker/Dockerfile
     env_file:
       - .env
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://backup:backup@postgres:5432/backup_control}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-    restart: on-failure
+      MAX_RETRIES: ${MAX_RETRIES:-3}
+      RQ_JOB_TIMEOUT: ${RQ_JOB_TIMEOUT:-2h}
+      FILE_SOURCE_ALLOWED_ROOTS: ${FILE_SOURCE_ALLOWED_ROOTS:-/data:/mnt/backups}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      METRICS_PORT: ${WORKER_METRICS_PORT:-9090}
+    command: ["python", "worker_main.py"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f worker_main.py >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    mem_limit: 1024m
+    cpus: 2.0
+    volumes:
+      - ./data:/data:ro
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -69,15 +119,30 @@ services:
 
   scheduler:
     build:
-      context: ./apps/worker
+      context: .
+      dockerfile: ./apps/worker/Dockerfile
     env_file:
       - .env
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://backup:backup@postgres:5432/backup_control}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-60}
+      MAX_RETRIES: ${MAX_RETRIES:-3}
+      RQ_JOB_TIMEOUT: ${RQ_JOB_TIMEOUT:-2h}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      METRICS_PORT: ${SCHEDULER_METRICS_PORT:-9090}
     command: ["python", "scheduler.py"]
-    restart: on-failure
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/scheduler.heartbeat || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    mem_limit: 128m
+    cpus: 0.5
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -85,8 +150,6 @@ services:
 
   web:
     image: nginx:alpine
-    environment:
-      API_BASE_URL: ${API_BASE_URL:-http://localhost:8000}
     ports:
       - "8080:80"
     volumes:

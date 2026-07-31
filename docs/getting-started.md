@@ -24,6 +24,11 @@ If you are using the defaults in the compose file, the stack will start with:
 - API on port 8000
 - Web UI on port 8080
 
+Set these important variables in `.env` before startup:
+
+- `API_KEYS` (recommended in any non-local environment)
+- `FILE_SOURCE_ALLOWED_ROOTS` (paths that file sources are allowed to back up)
+
 ## 2. Prepare the app environments
 
 Create the app-specific Poetry environments with Python 3.11 before starting the stack:
@@ -38,6 +43,8 @@ cd ../worker && poetry env use 3.11 && poetry install --no-root
 ```bash
 docker compose up --build
 ```
+
+The `migrate` one-shot service runs `alembic upgrade head` before API/worker/scheduler start.
 
 After the services are running, open:
 
@@ -94,3 +101,20 @@ Useful endpoints:
 - `GET /runs/{run_id}`
 - `POST /runs/trigger/{binding_id}`
 - `POST /runs/{run_id}/cancel`
+
+## 7. File source setup
+
+When using source type `file`, mount host directories into the worker and API
+containers and keep source `settings.root_path` inside `FILE_SOURCE_ALLOWED_ROOTS`.
+
+Example compose mount:
+
+```yaml
+services:
+	worker:
+		volumes:
+			- ./data:/data:ro
+	api:
+		volumes:
+			- ./data:/data:ro
+```
