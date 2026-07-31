@@ -68,7 +68,7 @@ services:
       - "8000:8000"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()\" || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 10
