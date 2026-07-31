@@ -24,6 +24,7 @@ import psycopg2
 
 from .auth import (
     ADMIN_USERNAME,
+    DUMMY_PASSWORD_HASH,
     create_session,
     enforce_api_key,
     hash_password,
@@ -368,7 +369,11 @@ def health() -> dict[str, str]:
 @app.post("/auth/login", response_model=LoginResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
     user = db.query(User).filter(User.username == payload.username).one_or_none()
-    if user is None or not verify_password(payload.password, user.password_hash):
+    # Always run verify_password, even for an unknown username, using a dummy hash
+    # so the response time does not reveal whether the username exists.
+    password_hash = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
+    password_ok = verify_password(payload.password, password_hash)
+    if user is None or not password_ok:
         raise HTTPException(status_code=401, detail="invalid username or password")
     token = create_session(db, user)
     return LoginResponse(token=token, username=user.username)
@@ -383,7 +388,12 @@ def logout(request: Request, db: Session = Depends(get_db)) -> dict[str, bool]:
 
 
 @app.get("/auth/me")
-def me() -> dict[str, str]:
+def me(request: Request) -> dict[str, str]:
+    user = getattr(request.state, "user", None)
+    if user is not None:
+        return {"username": user.username}
+    # Reached via a valid X-API-Key rather than a user session; there is no
+    # individual user identity in that case.
     return {"username": ADMIN_USERNAME}
 
 

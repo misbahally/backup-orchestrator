@@ -15,6 +15,10 @@ ADMIN_USERNAME = "admin"
 PBKDF2_ITERATIONS = 390_000
 SESSION_TTL = timedelta(hours=12)
 
+# Used to keep login timing constant when the username does not exist, so the
+# response time cannot be used to enumerate valid usernames.
+DUMMY_PASSWORD_HASH = f"pbkdf2_sha256${PBKDF2_ITERATIONS}${secrets.token_hex(16)}${secrets.token_hex(32)}"
+
 
 def configured_api_keys() -> list[str]:
     return [k.strip() for k in settings.api_keys.split(",") if k.strip()]

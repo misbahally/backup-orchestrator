@@ -27,14 +27,12 @@ function getAuthHeaders() {
 
 function showLoginScreen() {
   document.getElementById("login-screen").classList.remove("d-none");
-  document.getElementById("app-nav").classList.add("d-none");
-  document.getElementById("app-main").classList.add("d-none");
+  document.getElementById("app-shell").classList.add("d-none");
 }
 
 function showAppShell() {
   document.getElementById("login-screen").classList.add("d-none");
-  document.getElementById("app-nav").classList.remove("d-none");
-  document.getElementById("app-main").classList.remove("d-none");
+  document.getElementById("app-shell").classList.remove("d-none");
 }
 
 function clearSession() {
@@ -113,11 +111,19 @@ function openSettingsModal() {
   bootstrap.Modal.getOrCreateInstance(document.getElementById("settings-modal")).show();
 }
 
+function drawerFor(id) {
+  return bootstrap.Offcanvas.getOrCreateInstance(document.getElementById(id));
+}
+
+function setDrawerTitle(titleId, text) {
+  document.getElementById(titleId).textContent = text;
+}
+
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-bs-theme", theme);
   const icon = document.getElementById("theme-toggle-icon");
   if (icon) {
-    icon.innerHTML = theme === "dark" ? "&#9788;" : "&#9789;";
+    icon.className = theme === "dark" ? "bi bi-sun" : "bi bi-moon-stars";
   }
 }
 
@@ -132,18 +138,42 @@ function toggleTheme() {
   const next = current === "dark" ? "light" : "dark";
   localStorage.setItem("theme", next);
   applyTheme(next);
+  const topologyView = document.getElementById("topology-view");
+  if (appInitialized && topologyView && !topologyView.classList.contains("d-none")) {
+    refreshTopology().catch(() => {});
+  }
 }
 
 function badgeForStatus(status) {
-  const map = {
-    queued: "secondary",
-    running: "info",
-    success: "success",
-    failed: "danger",
-    cancelled: "warning",
-  };
-  const tone = map[String(status || "").toLowerCase()] || "secondary";
-  return `<span class="badge text-bg-${tone}">${escapeHtml(status)}</span>`;
+  const known = ["queued", "running", "success", "failed", "cancelled"];
+  const key = String(status || "").toLowerCase();
+  const cls = known.includes(key) ? `status-${key}` : "status-queued";
+  return `<span class="status-badge ${cls}">${escapeHtml(status)}</span>`;
+}
+
+function timeAgo(iso) {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) {
+    return String(iso);
+  }
+  const seconds = Math.round((Date.now() - then) / 1000);
+  if (seconds < 45) {
+    return "just now";
+  }
+  const units = [["y", 31536000], ["mo", 2592000], ["d", 86400], ["h", 3600], ["m", 60]];
+  for (const [suffix, span] of units) {
+    if (seconds >= span) {
+      return `${Math.floor(seconds / span)}${suffix} ago`;
+    }
+  }
+  return `${seconds}s ago`;
+}
+
+function timestampCell(iso) {
+  if (!iso) {
+    return "";
+  }
+  return `<span title="${escapeHtml(iso)}">${escapeHtml(timeAgo(iso))}</span>`;
 }
 
 function getBindingPayloadFromForm() {
@@ -298,7 +328,7 @@ function resetBindingEditState() {
   const form = document.getElementById("binding-form");
   form.reset();
   document.getElementById("binding-submit-btn").textContent = "Create Binding";
-  document.getElementById("binding-cancel-edit-btn").classList.add("d-none");
+  setDrawerTitle("binding-drawer-title", "New Binding");
 }
 
 function toggleSourceSettingsVisibility() {
@@ -324,7 +354,7 @@ function resetSourceEditState() {
   form.querySelector("[name='s3_region']").value = "us-east-1";
   toggleSourceSettingsVisibility();
   document.getElementById("source-submit-btn").textContent = "Save Source";
-  document.getElementById("source-cancel-edit-btn").classList.add("d-none");
+  setDrawerTitle("source-drawer-title", "New Source");
 }
 
 function startSourceEdit(source) {
@@ -351,7 +381,8 @@ function startSourceEdit(source) {
   form.querySelector("[name='is_active']").value = String(Boolean(source.is_active));
   toggleSourceSettingsVisibility();
   document.getElementById("source-submit-btn").textContent = "Save Source";
-  document.getElementById("source-cancel-edit-btn").classList.remove("d-none");
+  setDrawerTitle("source-drawer-title", `Edit Source: ${source.name}`);
+  drawerFor("source-drawer").show();
 }
 
 function resetDestinationEditState() {
@@ -362,7 +393,7 @@ function resetDestinationEditState() {
   form.querySelector("[name='region']").value = "us-east-1";
   form.querySelector("[name='is_active']").value = "true";
   document.getElementById("destination-submit-btn").textContent = "Save Destination";
-  document.getElementById("destination-cancel-edit-btn").classList.add("d-none");
+  setDrawerTitle("destination-drawer-title", "New Destination");
 }
 
 function startDestinationEdit(destination) {
@@ -376,7 +407,8 @@ function startDestinationEdit(destination) {
   form.querySelector("[name='secret_ref']").value = destination.secret_ref;
   form.querySelector("[name='is_active']").value = String(Boolean(destination.is_active));
   document.getElementById("destination-submit-btn").textContent = "Save Destination";
-  document.getElementById("destination-cancel-edit-btn").classList.remove("d-none");
+  setDrawerTitle("destination-drawer-title", `Edit Destination: ${destination.name}`);
+  drawerFor("destination-drawer").show();
 }
 
 function startBindingEdit(binding) {
@@ -387,7 +419,8 @@ function startBindingEdit(binding) {
   form.querySelector("[name='schedule_cron']").value = binding.schedule_cron || "0 2 * * *";
   form.querySelector("[name='policy']").value = JSON.stringify(binding.policy || {}, null, 2);
   document.getElementById("binding-submit-btn").textContent = "Save Binding";
-  document.getElementById("binding-cancel-edit-btn").classList.remove("d-none");
+  setDrawerTitle("binding-drawer-title", `Edit Binding #${binding.id}`);
+  drawerFor("binding-drawer").show();
 }
 
 function showMainView(viewId) {
@@ -414,19 +447,21 @@ function renderSourcesTable(sources) {
   const body = document.getElementById("sources-body");
   body.innerHTML = "";
   if (!sources.length) {
-    body.innerHTML = `<tr class="table-empty-row"><td colspan="7">No sources yet — create one on the left.</td></tr>`;
+    body.innerHTML = `<tr class="table-empty-row"><td colspan="5">No sources yet — use <strong>New Source</strong> to add one.</td></tr>`;
     return;
   }
   for (const s of sources) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${s.id}</td>
-      <td>${escapeHtml(s.name)}</td>
+      <td class="fw-medium">${escapeHtml(s.name)}</td>
       <td>${escapeHtml(s.source_type)}</td>
-      <td>${s.is_active ? "yes" : "no"}</td>
-      <td><button class="btn btn-sm btn-outline-secondary edit-source-row" data-source-id="${s.id}" type="button">Edit</button></td>
-      <td><button class="btn btn-sm btn-outline-danger delete-source-row" data-source-id="${s.id}" type="button">Delete</button></td>
-      <td><button class="btn btn-sm btn-outline-secondary test-source-row" data-source-id="${s.id}" type="button">Test</button></td>
+      <td>${s.is_active ? '<span class="status-badge status-success">active</span>' : '<span class="status-badge status-queued">inactive</span>'}</td>
+      <td class="text-end"><div class="table-actions">
+        <button class="btn btn-outline-secondary test-source-row" data-source-id="${s.id}" type="button" title="Test connection"><i class="bi bi-plug"></i></button>
+        <button class="btn btn-outline-secondary edit-source-row" data-source-id="${s.id}" type="button" title="Edit"><i class="bi bi-pencil"></i></button>
+        <button class="btn btn-outline-danger delete-source-row" data-source-id="${s.id}" type="button" title="Delete"><i class="bi bi-trash"></i></button>
+      </div></td>
     `;
     body.appendChild(tr);
   }
@@ -479,19 +514,21 @@ function renderDestinationsTable(destinations) {
   const body = document.getElementById("destinations-body");
   body.innerHTML = "";
   if (!destinations.length) {
-    body.innerHTML = `<tr class="table-empty-row"><td colspan="7">No destinations yet — create one on the left.</td></tr>`;
+    body.innerHTML = `<tr class="table-empty-row"><td colspan="5">No destinations yet — use <strong>New Destination</strong> to add one.</td></tr>`;
     return;
   }
   for (const d of destinations) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${d.id}</td>
-      <td>${escapeHtml(d.name)}</td>
+      <td class="fw-medium">${escapeHtml(d.name)}</td>
       <td>${escapeHtml(d.provider)}</td>
       <td>${escapeHtml(d.bucket)}</td>
-      <td><button class="btn btn-sm btn-outline-secondary edit-destination-row" data-destination-id="${d.id}" type="button">Edit</button></td>
-      <td><button class="btn btn-sm btn-outline-danger delete-destination-row" data-destination-id="${d.id}" type="button">Delete</button></td>
-      <td><button class="btn btn-sm btn-outline-secondary test-destination-row" data-destination-id="${d.id}" type="button">Test</button></td>
+      <td class="text-end"><div class="table-actions">
+        <button class="btn btn-outline-secondary test-destination-row" data-destination-id="${d.id}" type="button" title="Test connection"><i class="bi bi-plug"></i></button>
+        <button class="btn btn-outline-secondary edit-destination-row" data-destination-id="${d.id}" type="button" title="Edit"><i class="bi bi-pencil"></i></button>
+        <button class="btn btn-outline-danger delete-destination-row" data-destination-id="${d.id}" type="button" title="Delete"><i class="bi bi-trash"></i></button>
+      </div></td>
     `;
     body.appendChild(tr);
   }
@@ -547,7 +584,7 @@ function renderBindingsTable(bindings) {
   const body = document.getElementById("bindings-body");
   body.innerHTML = "";
   if (!bindings.length) {
-    body.innerHTML = `<tr class="table-empty-row"><td colspan="8">No bindings yet — create one on the left.</td></tr>`;
+    body.innerHTML = `<tr class="table-empty-row"><td colspan="5">No bindings yet — use <strong>New Binding</strong> to add one.</td></tr>`;
     return;
   }
   const sourceById = new Map(lastSources.map((s) => [s.id, s]));
@@ -558,13 +595,15 @@ function renderBindingsTable(bindings) {
     const destinationLabel = destinationById.has(b.destination_id) ? `${escapeHtml(destinationById.get(b.destination_id).name)} (#${b.destination_id})` : `#${b.destination_id}`;
     tr.innerHTML = `
       <td>${b.id}</td>
-      <td>${sourceLabel}</td>
-      <td>${destinationLabel}</td>
+      <td class="fw-medium">${sourceLabel}</td>
+      <td class="fw-medium">${destinationLabel}</td>
       <td><code>${escapeHtml(b.schedule_cron)}</code></td>
-      <td><button class="btn btn-sm btn-outline-primary trigger-run" data-binding-id="${b.id}" type="button">Trigger</button></td>
-      <td><button class="btn btn-sm btn-outline-secondary edit-binding" data-binding-id="${b.id}" type="button">Edit</button></td>
-      <td><button class="btn btn-sm btn-outline-danger delete-binding" data-binding-id="${b.id}" type="button">Delete</button></td>
-      <td><button class="btn btn-sm btn-outline-secondary test-binding-row" data-binding-id="${b.id}" type="button">Test</button></td>
+      <td class="text-end"><div class="table-actions">
+        <button class="btn btn-outline-primary trigger-run" data-binding-id="${b.id}" type="button" title="Trigger run now"><i class="bi bi-play-fill"></i></button>
+        <button class="btn btn-outline-secondary test-binding-row" data-binding-id="${b.id}" type="button" title="Test binding"><i class="bi bi-plug"></i></button>
+        <button class="btn btn-outline-secondary edit-binding" data-binding-id="${b.id}" type="button" title="Edit"><i class="bi bi-pencil"></i></button>
+        <button class="btn btn-outline-danger delete-binding" data-binding-id="${b.id}" type="button" title="Delete"><i class="bi bi-trash"></i></button>
+      </div></td>
     `;
     body.appendChild(tr);
   }
@@ -631,8 +670,8 @@ function renderBindingsTable(bindings) {
 async function refreshSelectors() {
   const sourcesBody = document.getElementById("sources-body");
   const destinationsBody = document.getElementById("destinations-body");
-  sourcesBody.innerHTML = `<tr class="table-loading-row"><td colspan="7">Loading sources…</td></tr>`;
-  destinationsBody.innerHTML = `<tr class="table-loading-row"><td colspan="7">Loading destinations…</td></tr>`;
+  sourcesBody.innerHTML = `<tr class="table-loading-row"><td colspan="5">Loading sources…</td></tr>`;
+  destinationsBody.innerHTML = `<tr class="table-loading-row"><td colspan="5">Loading destinations…</td></tr>`;
 
   const [sources, destinations] = await Promise.all([
     api("/sources"),
@@ -700,10 +739,11 @@ async function refreshTopology() {
   el.textContent = graph;
 
   if (window.mermaid?.initialize) {
+    const isDark = document.documentElement.getAttribute("data-bs-theme") === "dark";
     window.mermaid.initialize({
       startOnLoad: false,
       securityLevel: "loose",
-      theme: "default",
+      theme: isDark ? "dark" : "default",
     });
     await window.mermaid.run({ nodes: [el] });
   }
@@ -711,7 +751,7 @@ async function refreshTopology() {
 
 async function refreshBindings() {
   const body = document.getElementById("bindings-body");
-  body.innerHTML = `<tr class="table-loading-row"><td colspan="8">Loading bindings…</td></tr>`;
+  body.innerHTML = `<tr class="table-loading-row"><td colspan="5">Loading bindings…</td></tr>`;
   const bindings = await api("/bindings");
   renderBindingsTable(bindings);
 }
@@ -746,15 +786,15 @@ async function refreshRuns() {
     const cancellable = ["queued", "running"].includes(String(run.status).toLowerCase());
     const tr = document.createElement("tr");
     tr.innerHTML = `
-      <td><input class="run-selector" type="checkbox" data-run-id="${run.id}" ${cancellable ? "" : "disabled"} /></td>
-      <td><a href="#" class="text-decoration-none" data-run-id="${run.id}">${run.id}</a></td>
+      <td><input class="run-selector form-check-input" type="checkbox" data-run-id="${run.id}" ${cancellable ? "" : "disabled"} /></td>
+      <td><a href="#" class="text-decoration-none fw-medium" data-run-id="${run.id}">#${run.id}</a></td>
       <td>${run.binding_id}</td>
       <td>${badgeForStatus(run.status)}</td>
-      <td>${escapeHtml(run.started_at || "")}</td>
-      <td>${escapeHtml(run.finished_at || "")}</td>
+      <td>${timestampCell(run.started_at)}</td>
+      <td>${timestampCell(run.finished_at)}</td>
       <td>${formatBytes(run.bytes_transferred)}</td>
       <td>${escapeHtml(run.message || "")}</td>
-      <td><button class="btn btn-sm btn-outline-danger cancel-run" data-run-id="${run.id}" type="button" ${cancellable ? "" : "disabled"}>Cancel</button></td>
+      <td class="text-end"><button class="btn btn-sm btn-outline-danger cancel-run" data-run-id="${run.id}" type="button" title="Cancel run" ${cancellable ? "" : "disabled"}><i class="bi bi-x-circle"></i></button></td>
     `;
     body.appendChild(tr);
   }
@@ -788,6 +828,48 @@ async function refreshRuns() {
   });
 }
 
+async function refreshDashboard() {
+  const runsBody = document.getElementById("dashboard-runs-body");
+  runsBody.innerHTML = `<tr class="table-loading-row"><td colspan="6">Loading runs…</td></tr>`;
+  const [sources, destinations, bindings, runs] = await Promise.all([
+    api("/sources"),
+    api("/destinations"),
+    api("/bindings"),
+    api("/runs"),
+  ]);
+
+  document.getElementById("stat-sources").textContent = String(sources.length);
+  document.getElementById("stat-destinations").textContent = String(destinations.length);
+  document.getElementById("stat-bindings").textContent = String(bindings.length);
+  const dayAgo = Date.now() - 24 * 3600 * 1000;
+  const failures = runs.filter((run) => {
+    if (String(run.status).toLowerCase() !== "failed") {
+      return false;
+    }
+    const ts = new Date(run.started_at || run.finished_at || 0).getTime();
+    return !Number.isNaN(ts) && ts >= dayAgo;
+  }).length;
+  document.getElementById("stat-failures").textContent = String(failures);
+
+  runsBody.innerHTML = "";
+  if (!runs.length) {
+    runsBody.innerHTML = `<tr class="table-empty-row"><td colspan="6">No runs yet — trigger a binding to see activity here.</td></tr>`;
+    return;
+  }
+  for (const run of runs.slice(0, 5)) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="fw-medium">#${run.id}</td>
+      <td>${run.binding_id}</td>
+      <td>${badgeForStatus(run.status)}</td>
+      <td>${timestampCell(run.started_at)}</td>
+      <td>${formatBytes(run.bytes_transferred)}</td>
+      <td>${escapeHtml(run.message || "")}</td>
+    `;
+    runsBody.appendChild(tr);
+  }
+}
+
 async function boot() {
   initTheme();
 
@@ -813,6 +895,9 @@ async function boot() {
   document.querySelectorAll("#main-nav-list .nav-link").forEach((btn) => {
     btn.addEventListener("click", async () => {
       showMainView(btn.dataset.view);
+      if (btn.dataset.view === "dashboard-view") {
+        await refreshDashboard();
+      }
       if (btn.dataset.view === "topology-view") {
         await refreshTopology();
       }
@@ -895,6 +980,7 @@ async function boot() {
         setFlash("Destination saved");
       }
       resetDestinationEditState();
+      drawerFor("destination-drawer").hide();
       await refreshSelectors();
       await refreshTopology();
     } catch (err) {
@@ -917,6 +1003,7 @@ async function boot() {
         setFlash("Source saved");
       }
       resetSourceEditState();
+      drawerFor("source-drawer").hide();
       await refreshSelectors();
       await refreshTopology();
     } catch (err) {
@@ -937,6 +1024,7 @@ async function boot() {
         setFlash("Binding created");
       }
       resetBindingEditState();
+      drawerFor("binding-drawer").hide();
       await refreshBindings();
       await refreshTopology();
     } catch (err) {
@@ -944,16 +1032,36 @@ async function boot() {
     }
   });
 
-  document.getElementById("binding-cancel-edit-btn").addEventListener("click", () => {
-    resetBindingEditState();
-  });
-
-  document.getElementById("source-cancel-edit-btn").addEventListener("click", () => {
+  document.getElementById("new-source-btn").addEventListener("click", () => {
     resetSourceEditState();
+    drawerFor("source-drawer").show();
   });
 
-  document.getElementById("destination-cancel-edit-btn").addEventListener("click", () => {
+  document.getElementById("new-destination-btn").addEventListener("click", () => {
     resetDestinationEditState();
+    drawerFor("destination-drawer").show();
+  });
+
+  document.getElementById("new-binding-btn").addEventListener("click", () => {
+    resetBindingEditState();
+    drawerFor("binding-drawer").show();
+  });
+
+  document.getElementById("source-drawer").addEventListener("hidden.bs.offcanvas", resetSourceEditState);
+  document.getElementById("destination-drawer").addEventListener("hidden.bs.offcanvas", resetDestinationEditState);
+  document.getElementById("binding-drawer").addEventListener("hidden.bs.offcanvas", resetBindingEditState);
+
+  document.getElementById("refresh-topology").addEventListener("click", async () => {
+    try {
+      await refreshTopology();
+    } catch (err) {
+      setFlash(`Topology refresh failed: ${err.message}`, "danger");
+    }
+  });
+
+  document.getElementById("dashboard-goto-runs").addEventListener("click", async () => {
+    showMainView("operations-view");
+    await refreshRuns();
   });
 
   document.getElementById("refresh-runs").addEventListener("click", refreshRuns);
@@ -988,6 +1096,7 @@ async function boot() {
   });
 
   async function loadInitialData() {
+    await refreshDashboard();
     await refreshSelectors();
     await refreshBindings();
     await refreshTopology();
@@ -1001,6 +1110,10 @@ async function boot() {
       if (!operationsView.classList.contains("d-none")) {
         await refreshRuns();
         await refreshTopology();
+      }
+      const dashboardView = document.getElementById("dashboard-view");
+      if (!dashboardView.classList.contains("d-none")) {
+        await refreshDashboard();
       }
     }, 10000);
   }

@@ -10,15 +10,31 @@
       integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
       crossorigin="anonymous"
     />
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+      rel="stylesheet"
+      crossorigin="anonymous"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="styles.css" />
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   </head>
   <body>
-    <div id="login-screen" class="d-flex align-items-center justify-content-center vh-100">
-      <div class="card border-0 shadow-sm" style="width: 100%; max-width: 380px;">
-        <div class="card-body p-4">
-          <h1 class="h4 mb-1 text-center">Backup Control Plane</h1>
-          <p class="text-body-secondary small text-center mb-4">Sign in to continue</p>
+    <div id="login-screen" class="login-hero d-flex align-items-center justify-content-center vh-100">
+      <div class="card login-card border-0 shadow" style="width: 100%; max-width: 400px;">
+        <div class="card-body p-4 p-md-5">
+          <div class="text-center mb-4">
+            <div class="login-brand-mark mx-auto mb-3">
+              <i class="bi bi-shield-check"></i>
+            </div>
+            <h1 class="h4 mb-1">Backup Control Plane</h1>
+            <p class="text-body-secondary small mb-0">Sign in to continue</p>
+          </div>
           <form id="login-form" class="vstack gap-3">
             <div>
               <label class="form-label small mb-1" for="login-username-input">Username</label>
@@ -35,59 +51,141 @@
       </div>
     </div>
 
-    <nav id="app-nav" class="navbar navbar-expand-lg bg-body-tertiary border-bottom sticky-top d-none">
-      <div class="container-fluid px-4">
-        <span class="navbar-brand fw-semibold">Backup Control Plane</span>
-        <button
-          class="navbar-toggler"
-          type="button"
-          data-bs-toggle="collapse"
-          data-bs-target="#mainNav"
-          aria-controls="mainNav"
-          aria-expanded="false"
-          aria-label="Toggle navigation"
-        >
-          <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="mainNav">
-          <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-lg-center" id="main-nav-list">
-            <li class="nav-item">
-              <button class="nav-link active btn btn-link" data-view="topology-view" type="button">Topology Map</button>
-            </li>
-            <li class="nav-item">
-              <button class="nav-link btn btn-link" data-view="configuration-view" type="button">Configuration Hub</button>
-            </li>
-            <li class="nav-item">
-              <button class="nav-link btn btn-link" data-view="operations-view" type="button">Run Operations</button>
-            </li>
-            <li class="nav-item ms-lg-2">
-              <button class="btn btn-outline-secondary btn-sm" id="theme-toggle-btn" type="button" title="Toggle dark mode" aria-label="Toggle dark mode">
-                <span id="theme-toggle-icon">&#9789;</span>
-              </button>
-            </li>
-            <li class="nav-item ms-lg-2">
-              <button class="btn btn-outline-secondary btn-sm" id="open-settings-btn" type="button" title="Connection settings" aria-label="Connection settings">
-                &#9881;&#65039; Settings
-              </button>
-            </li>
-            <li class="nav-item ms-lg-2">
-              <button class="btn btn-outline-secondary btn-sm" id="logout-btn" type="button" title="Log out" aria-label="Log out">
-                Logout
-              </button>
-            </li>
-          </ul>
+    <div id="app-shell" class="app-shell d-none">
+      <aside class="app-sidebar d-flex flex-column">
+        <div class="sidebar-brand d-flex align-items-center gap-2">
+          <i class="bi bi-shield-check"></i>
+          <span>Backup Control Plane</span>
         </div>
-      </div>
-    </nav>
+        <ul class="nav flex-column sidebar-nav" id="main-nav-list">
+          <li class="nav-item">
+            <button class="nav-link active" data-view="dashboard-view" type="button">
+              <i class="bi bi-speedometer2"></i><span>Dashboard</span>
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-view="topology-view" type="button">
+              <i class="bi bi-diagram-3"></i><span>Topology</span>
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-view="configuration-view" type="button">
+              <i class="bi bi-sliders"></i><span>Configuration</span>
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-view="operations-view" type="button">
+              <i class="bi bi-activity"></i><span>Runs</span>
+            </button>
+          </li>
+        </ul>
+        <div class="sidebar-footer mt-auto d-flex flex-column gap-1">
+          <button class="sidebar-action" id="theme-toggle-btn" type="button" title="Toggle dark mode" aria-label="Toggle dark mode">
+            <i class="bi bi-moon-stars" id="theme-toggle-icon"></i><span>Theme</span>
+          </button>
+          <button class="sidebar-action" id="open-settings-btn" type="button" title="Connection settings" aria-label="Connection settings">
+            <i class="bi bi-gear"></i><span>Settings</span>
+          </button>
+          <button class="sidebar-action" id="logout-btn" type="button" title="Log out" aria-label="Log out">
+            <i class="bi bi-box-arrow-right"></i><span>Logout</span>
+          </button>
+        </div>
+      </aside>
 
-    <main id="app-main" class="container-fluid px-4 py-4 d-none">
+      <main id="app-main" class="app-content">
       <div class="toast-container position-fixed top-0 end-0 p-3" id="toast-container" style="z-index: 1080"></div>
 
-      <section id="topology-view" class="app-view">
+      <section id="dashboard-view" class="app-view">
+        <header class="page-header mb-4">
+          <h2 class="h4 mb-1">Dashboard</h2>
+          <p class="text-body-secondary mb-0">Backup estate at a glance.</p>
+        </header>
+        <div class="row g-3">
+          <div class="col-sm-6 col-xl-3">
+            <div class="card stat-card border-0 shadow-sm h-100">
+              <div class="card-body d-flex align-items-center gap-3">
+                <div class="stat-icon stat-icon-primary"><i class="bi bi-hdd-network"></i></div>
+                <div>
+                  <div class="stat-value" id="stat-sources">–</div>
+                  <div class="stat-label">Sources</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-sm-6 col-xl-3">
+            <div class="card stat-card border-0 shadow-sm h-100">
+              <div class="card-body d-flex align-items-center gap-3">
+                <div class="stat-icon stat-icon-info"><i class="bi bi-bucket"></i></div>
+                <div>
+                  <div class="stat-value" id="stat-destinations">–</div>
+                  <div class="stat-label">Destinations</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-sm-6 col-xl-3">
+            <div class="card stat-card border-0 shadow-sm h-100">
+              <div class="card-body d-flex align-items-center gap-3">
+                <div class="stat-icon stat-icon-success"><i class="bi bi-arrow-left-right"></i></div>
+                <div>
+                  <div class="stat-value" id="stat-bindings">–</div>
+                  <div class="stat-label">Bindings</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="col-sm-6 col-xl-3">
+            <div class="card stat-card border-0 shadow-sm h-100">
+              <div class="card-body d-flex align-items-center gap-3">
+                <div class="stat-icon stat-icon-danger"><i class="bi bi-exclamation-triangle"></i></div>
+                <div>
+                  <div class="stat-value" id="stat-failures">–</div>
+                  <div class="stat-label">Failures (24h)</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card border-0 shadow-sm mt-4">
+          <div class="card-header bg-body border-0 pt-4 pb-0 px-4 d-flex justify-content-between align-items-center">
+            <div>
+              <h3 class="h5 mb-1">Recent Runs</h3>
+              <p class="text-body-secondary mb-3">Latest backup executions.</p>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" id="dashboard-goto-runs" type="button">
+              View all <i class="bi bi-arrow-right"></i>
+            </button>
+          </div>
+          <div class="card-body px-4 pb-4">
+            <div class="table-responsive">
+              <table class="table table-hover align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Run</th>
+                    <th>Binding</th>
+                    <th>Status</th>
+                    <th>Started</th>
+                    <th>Bytes</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody id="dashboard-runs-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="topology-view" class="app-view d-none">
         <div class="card border-0 shadow-sm">
-          <div class="card-header bg-body border-0 pt-4 pb-0 px-4">
-            <h2 class="h4 mb-1">Topology Map</h2>
-            <p class="text-body-secondary mb-3">Live view of configured source-to-destination links.</p>
+          <div class="card-header bg-body border-0 pt-4 pb-0 px-4 d-flex justify-content-between align-items-center">
+            <div>
+              <h2 class="h4 mb-1">Topology Map</h2>
+              <p class="text-body-secondary mb-3">Live view of configured source-to-destination links.</p>
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" id="refresh-topology" type="button">
+              <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
           </div>
           <div class="card-body px-4 pb-4">
             <div id="topology" class="topology-canvas"></div>
@@ -115,298 +213,71 @@
             </ul>
 
             <div id="sources-panel" class="config-panel">
-              <div class="row g-4">
-                <div class="col-lg-5">
-                  <h3 class="h5">New Source</h3>
-                  <p class="text-body-secondary small mb-2">Choose the source type and fill in the S3 connection details below.</p>
-                  <form id="source-form" class="vstack gap-3">
-                    <input type="hidden" name="is_active" value="true" />
-                    <div>
-                      <label class="form-label small mb-1" for="source-name-input">Source Name</label>
-                      <input class="form-control" id="source-name-input" name="name" placeholder="e.g. Primary Postgres" required />
-                    </div>
-                    <div>
-                      <label class="form-label small mb-1" for="source-type-input">Source Type</label>
-                      <select class="form-select" id="source-type-input" name="source_type" required>
-                        <option value="s3">s3</option>
-                        <option value="mysql">mysql</option>
-                        <option value="postgresql">postgresql</option>
-                        <option value="file">file</option>
-                      </select>
-                    </div>
-                    <div id="s3-settings-panel" class="border rounded p-3 bg-body-tertiary d-none">
-                      <div class="fw-semibold small mb-2">S3 connection details</div>
-                      <div class="row g-2">
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">Bucket</label>
-                          <input class="form-control form-control-sm" name="s3_bucket" placeholder="my-backup-bucket" />
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">Prefix</label>
-                          <input class="form-control form-control-sm" name="s3_prefix" placeholder="backups/" />
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">Region</label>
-                          <input class="form-control form-control-sm" name="s3_region" placeholder="us-east-1" value="us-east-1" />
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">Endpoint</label>
-                          <input class="form-control form-control-sm" name="s3_endpoint" placeholder="https://s3.amazonaws.com" />
-                        </div>
-                        <div class="col-12">
-                          <label class="form-label small mb-1">Secret Ref</label>
-                          <input class="form-control form-control-sm" name="s3_secret_ref" placeholder="vault path or secret name" />
-                        </div>
-                        <div class="col-12">
-                          <label class="form-label small mb-1">Encryption</label>
-                          <select class="form-select form-select-sm" name="s3_encryption_mode">
-                            <option value="">None</option>
-                            <option value="SSE-S3">SSE-S3</option>
-                            <option value="SSE-KMS">SSE-KMS</option>
-                            <option value="SSE-C">SSE-C</option>
-                          </select>
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">KMS Key ID</label>
-                          <input class="form-control form-control-sm" name="s3_kms_key_id" placeholder="KMS Key ID" />
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">KMS Key ARN</label>
-                          <input class="form-control form-control-sm" name="s3_kms_key_arn" placeholder="KMS Key ARN" />
-                        </div>
-                        <div class="col-12">
-                          <label class="form-label small mb-1">Customer Key Ref</label>
-                          <input class="form-control form-control-sm" name="s3_customer_key_ref" placeholder="Customer Key Ref" />
-                        </div>
-                      </div>
-                    </div>
-                    <div id="database-settings-panel" class="border rounded p-3 bg-body-tertiary d-none">
-                      <div class="fw-semibold small mb-2">Database connection details</div>
-                      <div class="row g-2">
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">Host</label>
-                          <input class="form-control form-control-sm" name="db_host" placeholder="db.internal" />
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">Port</label>
-                          <input class="form-control form-control-sm" name="db_port" placeholder="5432" />
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">Database</label>
-                          <input class="form-control form-control-sm" name="db_database" placeholder="app_production" />
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">Username</label>
-                          <input class="form-control form-control-sm" name="db_username" placeholder="backup_user" />
-                        </div>
-                        <div class="col-12">
-                          <label class="form-label small mb-1">Password</label>
-                          <input class="form-control form-control-sm" type="password" name="db_password" placeholder="••••••••" autocomplete="new-password" />
-                        </div>
-                        <div class="col-12">
-                          <label class="form-label small mb-1">Secret Ref</label>
-                          <input class="form-control form-control-sm" name="db_secret_ref" placeholder="vault path or secret name" />
-                        </div>
-                      </div>
-                    </div>
-                    <div id="file-settings-panel" class="border rounded p-3 bg-body-tertiary d-none">
-                      <div class="fw-semibold small mb-2">Filesystem source details</div>
-                      <div class="row g-2">
-                        <div class="col-12">
-                          <label class="form-label small mb-1">Root Path</label>
-                          <input class="form-control form-control-sm" name="file_root_path" placeholder="Root path inside worker container (e.g. /data)" />
-                        </div>
-                        <div class="col-12">
-                          <label class="form-label small mb-1">Include Globs</label>
-                          <input class="form-control form-control-sm" name="file_include_globs" placeholder="Comma separated, e.g. **/*.sql, **/*.gz" />
-                        </div>
-                        <div class="col-12">
-                          <label class="form-label small mb-1">Exclude Globs</label>
-                          <input class="form-control form-control-sm" name="file_exclude_globs" placeholder="Comma separated, e.g. **/*.tmp" />
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">Symlinks</label>
-                          <select class="form-select form-select-sm" name="file_follow_symlinks">
-                            <option value="false">Do not follow symlinks</option>
-                            <option value="true">Follow symlinks</option>
-                          </select>
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">S3 Key Prefix</label>
-                          <input class="form-control form-control-sm" name="file_key_prefix" placeholder="Optional" />
-                        </div>
-                      </div>
-                    </div>
-                    <div class="d-flex gap-2 flex-wrap">
-                      <button class="btn btn-primary" id="source-submit-btn" type="submit">Save Source</button>
-                      <button class="btn btn-outline-secondary d-none" id="source-cancel-edit-btn" type="button">Cancel Edit</button>
-                      <button class="btn btn-outline-secondary" id="test-source-btn" type="button">Test Source</button>
-                    </div>
-                  </form>
-                </div>
-                <div class="col-lg-7">
-                  <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h3 class="h5 mb-0">Registered Sources</h3>
-                  </div>
-                  <div class="table-responsive">
-                    <table class="table table-sm align-middle">
-                      <thead>
-                        <tr>
-                          <th>ID</th>
-                          <th>Name</th>
-                          <th>Type</th>
-                          <th>Active</th>
-                          <th>Edit</th>
-                          <th>Delete</th>
-                          <th>Test</th>
-                        </tr>
-                      </thead>
-                      <tbody id="sources-body"></tbody>
-                    </table>
-                  </div>
-                </div>
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3 class="h5 mb-0">Registered Sources</h3>
+                <button class="btn btn-primary btn-sm" id="new-source-btn" type="button">
+                  <i class="bi bi-plus-lg"></i> New Source
+                </button>
+              </div>
+              <div class="table-responsive">
+                <table class="table align-middle">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Name</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                      <th class="text-end">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sources-body"></tbody>
+                </table>
               </div>
             </div>
 
             <div id="destinations-panel" class="config-panel d-none">
-              <div class="row g-4">
-                <div class="col-lg-5">
-                  <h3 class="h5">New Destination</h3>
-                  <p class="text-body-secondary small mb-2">Fill in the S3 destination details below. The backend will still send them as normal destination fields.</p>
-                  <form id="destination-form" class="vstack gap-3">
-                    <input type="hidden" name="is_active" value="true" />
-                    <div>
-                      <label class="form-label small mb-1" for="destination-name-input">Destination Name</label>
-                      <input class="form-control" id="destination-name-input" name="name" placeholder="e.g. Offsite Archive" required />
-                    </div>
-                    <div>
-                      <label class="form-label small mb-1" for="destination-provider-input">Provider</label>
-                      <input class="form-control" id="destination-provider-input" name="provider" value="s3-compatible" required readonly style="background-color: var(--bs-secondary-bg);" />
-                    </div>
-                    <div class="border rounded p-3 bg-body-tertiary">
-                      <div class="fw-semibold small mb-2">S3 connection details</div>
-                      <div class="row g-2">
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">Endpoint</label>
-                          <input class="form-control form-control-sm" name="endpoint" placeholder="https://s3.amazonaws.com" />
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">Bucket</label>
-                          <input class="form-control form-control-sm" name="bucket" placeholder="my-offsite-bucket" />
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">Region</label>
-                          <input class="form-control form-control-sm" name="region" placeholder="us-east-1" value="us-east-1" />
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">Secret Ref</label>
-                          <input class="form-control form-control-sm" name="secret_ref" placeholder="vault path or secret name" />
-                        </div>
-                        <div class="col-12">
-                          <label class="form-label small mb-1">Encryption</label>
-                          <select class="form-select form-select-sm" name="destination_encryption_mode">
-                            <option value="">None</option>
-                            <option value="SSE-S3">SSE-S3</option>
-                            <option value="SSE-KMS">SSE-KMS</option>
-                            <option value="SSE-C">SSE-C</option>
-                          </select>
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">KMS Key ID</label>
-                          <input class="form-control form-control-sm" name="destination_kms_key_id" placeholder="KMS Key ID" />
-                        </div>
-                        <div class="col-md-6">
-                          <label class="form-label small mb-1">KMS Key ARN</label>
-                          <input class="form-control form-control-sm" name="destination_kms_key_arn" placeholder="KMS Key ARN" />
-                        </div>
-                        <div class="col-12">
-                          <label class="form-label small mb-1">Customer Key Ref</label>
-                          <input class="form-control form-control-sm" name="destination_customer_key_ref" placeholder="Customer Key Ref" />
-                        </div>
-                      </div>
-                    </div>
-                    <div class="d-flex gap-2 flex-wrap">
-                      <button class="btn btn-primary" id="destination-submit-btn" type="submit">Save Destination</button>
-                      <button class="btn btn-outline-secondary d-none" id="destination-cancel-edit-btn" type="button">Cancel Edit</button>
-                      <button class="btn btn-outline-secondary" id="test-destination-btn" type="button">Test Destination</button>
-                    </div>
-                  </form>
-                </div>
-                <div class="col-lg-7">
-                  <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h3 class="h5 mb-0">Registered Destinations</h3>
-                  </div>
-                  <div class="table-responsive">
-                    <table class="table table-sm align-middle">
-                      <thead>
-                        <tr>
-                          <th>ID</th>
-                          <th>Name</th>
-                          <th>Provider</th>
-                          <th>Bucket</th>
-                          <th>Edit</th>
-                          <th>Delete</th>
-                          <th>Test</th>
-                        </tr>
-                      </thead>
-                      <tbody id="destinations-body"></tbody>
-                    </table>
-                  </div>
-                </div>
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3 class="h5 mb-0">Registered Destinations</h3>
+                <button class="btn btn-primary btn-sm" id="new-destination-btn" type="button">
+                  <i class="bi bi-plus-lg"></i> New Destination
+                </button>
+              </div>
+              <div class="table-responsive">
+                <table class="table align-middle">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Name</th>
+                      <th>Provider</th>
+                      <th>Bucket</th>
+                      <th class="text-end">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="destinations-body"></tbody>
+                </table>
               </div>
             </div>
 
             <div id="bindings-panel" class="config-panel d-none">
-              <div class="row g-4">
-                <div class="col-lg-5">
-                  <h3 class="h5">Create Binding</h3>
-                  <p class="text-body-secondary small mb-2">Put source encryption under <code>settings.encryption</code> and destination encryption under <code>policy.encryption</code>. Example: <code>{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}</code>.</p>
-                  <form id="binding-form" class="vstack gap-3">
-                    <div>
-                      <label class="form-label small mb-1" for="source-select">Source</label>
-                      <select class="form-select" name="source_id" id="source-select" required></select>
-                    </div>
-                    <div>
-                      <label class="form-label small mb-1" for="destination-select">Destination</label>
-                      <select class="form-select" name="destination_id" id="destination-select" required></select>
-                    </div>
-                    <div>
-                      <label class="form-label small mb-1" for="schedule-cron-input">Schedule (cron)</label>
-                      <input class="form-control" id="schedule-cron-input" name="schedule_cron" value="0 2 * * *" required />
-                    </div>
-                    <div>
-                      <label class="form-label small mb-1" for="binding-policy-input">Policy (JSON)</label>
-                      <textarea class="form-control" id="binding-policy-input" name="policy" placeholder='e.g. {"retention_days":30,"dest_prefix":"daily","encryption":{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}}'></textarea>
-                    </div>
-                    <div class="d-flex gap-2 flex-wrap">
-                      <button class="btn btn-primary" id="binding-submit-btn" type="submit">Create Binding</button>
-                      <button class="btn btn-outline-secondary d-none" id="binding-cancel-edit-btn" type="button">Cancel Edit</button>
-                      <button class="btn btn-outline-secondary" id="test-binding-btn" type="button">Test Binding</button>
-                    </div>
-                  </form>
-                </div>
-                <div class="col-lg-7">
-                  <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h3 class="h5 mb-0">Active Bindings</h3>
-                  </div>
-                  <div class="table-responsive">
-                    <table class="table table-sm align-middle">
-                      <thead>
-                        <tr>
-                          <th>ID</th>
-                          <th>Source</th>
-                          <th>Destination</th>
-                          <th>Schedule</th>
-                          <th>Run</th>
-                          <th>Edit</th>
-                          <th>Delete</th>
-                          <th>Test</th>
-                        </tr>
-                      </thead>
-                      <tbody id="bindings-body"></tbody>
-                    </table>
-                  </div>
-                </div>
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3 class="h5 mb-0">Active Bindings</h3>
+                <button class="btn btn-primary btn-sm" id="new-binding-btn" type="button">
+                  <i class="bi bi-plus-lg"></i> New Binding
+                </button>
+              </div>
+              <div class="table-responsive">
+                <table class="table align-middle">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Source</th>
+                      <th>Destination</th>
+                      <th>Schedule</th>
+                      <th class="text-end">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bindings-body"></tbody>
+                </table>
               </div>
             </div>
           </div>
@@ -421,8 +292,8 @@
               <p class="text-body-secondary mb-3">Track execution status and recent backup outcomes.</p>
             </div>
             <div class="d-flex gap-2">
-              <button id="cancel-selected-runs" class="btn btn-outline-danger btn-sm" type="button">Cancel Selected</button>
-              <button id="refresh-runs" class="btn btn-outline-primary btn-sm" type="button">Refresh</button>
+              <button id="cancel-selected-runs" class="btn btn-outline-danger btn-sm" type="button"><i class="bi bi-x-circle"></i> Cancel Selected</button>
+              <button id="refresh-runs" class="btn btn-outline-secondary btn-sm" type="button"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
             </div>
           </div>
           <div class="card-body px-4 pb-4">
@@ -430,7 +301,7 @@
               <table class="table table-hover align-middle">
                 <thead>
                   <tr>
-                    <th><input id="select-all-runs" type="checkbox" /></th>
+                    <th><input id="select-all-runs" type="checkbox" class="form-check-input" /></th>
                     <th>Run ID</th>
                     <th>Binding</th>
                     <th>Status</th>
@@ -438,7 +309,7 @@
                     <th>Finished</th>
                     <th>Bytes</th>
                     <th>Message</th>
-                    <th>Cancel</th>
+                    <th class="text-end">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="runs-body"></tbody>
@@ -457,7 +328,241 @@
           </div>
         </div>
       </section>
-    </main>
+      </main>
+    </div>
+
+    <div class="offcanvas offcanvas-end offcanvas-form" tabindex="-1" id="source-drawer" aria-labelledby="source-drawer-title">
+      <div class="offcanvas-header border-bottom">
+        <h5 class="offcanvas-title" id="source-drawer-title">New Source</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+      </div>
+      <div class="offcanvas-body">
+        <form id="source-form" class="vstack gap-3">
+          <input type="hidden" name="is_active" value="true" />
+          <div>
+            <label class="form-label small mb-1" for="source-name-input">Source Name</label>
+            <input class="form-control" id="source-name-input" name="name" placeholder="e.g. Primary Postgres" required />
+          </div>
+          <div>
+            <label class="form-label small mb-1" for="source-type-input">Source Type</label>
+            <select class="form-select" id="source-type-input" name="source_type" required>
+              <option value="s3">s3</option>
+              <option value="mysql">mysql</option>
+              <option value="postgresql">postgresql</option>
+              <option value="file">file</option>
+            </select>
+          </div>
+          <div id="s3-settings-panel" class="border rounded p-3 bg-body-tertiary d-none">
+            <div class="fw-semibold small mb-2">S3 connection details</div>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Bucket</label>
+                <input class="form-control form-control-sm" name="s3_bucket" placeholder="my-backup-bucket" />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Prefix</label>
+                <input class="form-control form-control-sm" name="s3_prefix" placeholder="backups/" />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Region</label>
+                <input class="form-control form-control-sm" name="s3_region" placeholder="us-east-1" value="us-east-1" />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Endpoint</label>
+                <input class="form-control form-control-sm" name="s3_endpoint" placeholder="https://s3.amazonaws.com" />
+              </div>
+              <div class="col-12">
+                <label class="form-label small mb-1">Secret Ref</label>
+                <input class="form-control form-control-sm" name="s3_secret_ref" placeholder="vault path or secret name" />
+              </div>
+              <div class="col-12">
+                <label class="form-label small mb-1">Encryption</label>
+                <select class="form-select form-select-sm" name="s3_encryption_mode">
+                  <option value="">None</option>
+                  <option value="SSE-S3">SSE-S3</option>
+                  <option value="SSE-KMS">SSE-KMS</option>
+                  <option value="SSE-C">SSE-C</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">KMS Key ID</label>
+                <input class="form-control form-control-sm" name="s3_kms_key_id" placeholder="KMS Key ID" />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">KMS Key ARN</label>
+                <input class="form-control form-control-sm" name="s3_kms_key_arn" placeholder="KMS Key ARN" />
+              </div>
+              <div class="col-12">
+                <label class="form-label small mb-1">Customer Key Ref</label>
+                <input class="form-control form-control-sm" name="s3_customer_key_ref" placeholder="Customer Key Ref" />
+              </div>
+            </div>
+          </div>
+          <div id="database-settings-panel" class="border rounded p-3 bg-body-tertiary d-none">
+            <div class="fw-semibold small mb-2">Database connection details</div>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Host</label>
+                <input class="form-control form-control-sm" name="db_host" placeholder="db.internal" />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Port</label>
+                <input class="form-control form-control-sm" name="db_port" placeholder="5432" />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Database</label>
+                <input class="form-control form-control-sm" name="db_database" placeholder="app_production" />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Username</label>
+                <input class="form-control form-control-sm" name="db_username" placeholder="backup_user" />
+              </div>
+              <div class="col-12">
+                <label class="form-label small mb-1">Password</label>
+                <input class="form-control form-control-sm" type="password" name="db_password" placeholder="••••••••" autocomplete="new-password" />
+              </div>
+              <div class="col-12">
+                <label class="form-label small mb-1">Secret Ref</label>
+                <input class="form-control form-control-sm" name="db_secret_ref" placeholder="vault path or secret name" />
+              </div>
+            </div>
+          </div>
+          <div id="file-settings-panel" class="border rounded p-3 bg-body-tertiary d-none">
+            <div class="fw-semibold small mb-2">Filesystem source details</div>
+            <div class="row g-2">
+              <div class="col-12">
+                <label class="form-label small mb-1">Root Path</label>
+                <input class="form-control form-control-sm" name="file_root_path" placeholder="Root path inside worker container (e.g. /data)" />
+              </div>
+              <div class="col-12">
+                <label class="form-label small mb-1">Include Globs</label>
+                <input class="form-control form-control-sm" name="file_include_globs" placeholder="Comma separated, e.g. **/*.sql, **/*.gz" />
+              </div>
+              <div class="col-12">
+                <label class="form-label small mb-1">Exclude Globs</label>
+                <input class="form-control form-control-sm" name="file_exclude_globs" placeholder="Comma separated, e.g. **/*.tmp" />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Symlinks</label>
+                <select class="form-select form-select-sm" name="file_follow_symlinks">
+                  <option value="false">Do not follow symlinks</option>
+                  <option value="true">Follow symlinks</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">S3 Key Prefix</label>
+                <input class="form-control form-control-sm" name="file_key_prefix" placeholder="Optional" />
+              </div>
+            </div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap pt-2 border-top">
+            <button class="btn btn-primary" id="source-submit-btn" type="submit">Save Source</button>
+            <button class="btn btn-outline-secondary" id="test-source-btn" type="button">Test Source</button>
+            <button class="btn btn-outline-secondary ms-auto" type="button" data-bs-dismiss="offcanvas">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="offcanvas offcanvas-end offcanvas-form" tabindex="-1" id="destination-drawer" aria-labelledby="destination-drawer-title">
+      <div class="offcanvas-header border-bottom">
+        <h5 class="offcanvas-title" id="destination-drawer-title">New Destination</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+      </div>
+      <div class="offcanvas-body">
+        <form id="destination-form" class="vstack gap-3">
+          <input type="hidden" name="is_active" value="true" />
+          <div>
+            <label class="form-label small mb-1" for="destination-name-input">Destination Name</label>
+            <input class="form-control" id="destination-name-input" name="name" placeholder="e.g. Offsite Archive" required />
+          </div>
+          <div>
+            <label class="form-label small mb-1" for="destination-provider-input">Provider</label>
+            <input class="form-control" id="destination-provider-input" name="provider" value="s3-compatible" required readonly style="background-color: var(--bs-secondary-bg);" />
+          </div>
+          <div class="border rounded p-3 bg-body-tertiary">
+            <div class="fw-semibold small mb-2">S3 connection details</div>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Endpoint</label>
+                <input class="form-control form-control-sm" name="endpoint" placeholder="https://s3.amazonaws.com" />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Bucket</label>
+                <input class="form-control form-control-sm" name="bucket" placeholder="my-offsite-bucket" />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Region</label>
+                <input class="form-control form-control-sm" name="region" placeholder="us-east-1" value="us-east-1" />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">Secret Ref</label>
+                <input class="form-control form-control-sm" name="secret_ref" placeholder="vault path or secret name" />
+              </div>
+              <div class="col-12">
+                <label class="form-label small mb-1">Encryption</label>
+                <select class="form-select form-select-sm" name="destination_encryption_mode">
+                  <option value="">None</option>
+                  <option value="SSE-S3">SSE-S3</option>
+                  <option value="SSE-KMS">SSE-KMS</option>
+                  <option value="SSE-C">SSE-C</option>
+                </select>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">KMS Key ID</label>
+                <input class="form-control form-control-sm" name="destination_kms_key_id" placeholder="KMS Key ID" />
+              </div>
+              <div class="col-md-6">
+                <label class="form-label small mb-1">KMS Key ARN</label>
+                <input class="form-control form-control-sm" name="destination_kms_key_arn" placeholder="KMS Key ARN" />
+              </div>
+              <div class="col-12">
+                <label class="form-label small mb-1">Customer Key Ref</label>
+                <input class="form-control form-control-sm" name="destination_customer_key_ref" placeholder="Customer Key Ref" />
+              </div>
+            </div>
+          </div>
+          <div class="d-flex gap-2 flex-wrap pt-2 border-top">
+            <button class="btn btn-primary" id="destination-submit-btn" type="submit">Save Destination</button>
+            <button class="btn btn-outline-secondary" id="test-destination-btn" type="button">Test Destination</button>
+            <button class="btn btn-outline-secondary ms-auto" type="button" data-bs-dismiss="offcanvas">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="offcanvas offcanvas-end offcanvas-form" tabindex="-1" id="binding-drawer" aria-labelledby="binding-drawer-title">
+      <div class="offcanvas-header border-bottom">
+        <h5 class="offcanvas-title" id="binding-drawer-title">New Binding</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+      </div>
+      <div class="offcanvas-body">
+        <p class="text-body-secondary small">Put source encryption under <code>settings.encryption</code> and destination encryption under <code>policy.encryption</code>. Example: <code>{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}</code>.</p>
+        <form id="binding-form" class="vstack gap-3">
+          <div>
+            <label class="form-label small mb-1" for="source-select">Source</label>
+            <select class="form-select" name="source_id" id="source-select" required></select>
+          </div>
+          <div>
+            <label class="form-label small mb-1" for="destination-select">Destination</label>
+            <select class="form-select" name="destination_id" id="destination-select" required></select>
+          </div>
+          <div>
+            <label class="form-label small mb-1" for="schedule-cron-input">Schedule (cron)</label>
+            <input class="form-control" id="schedule-cron-input" name="schedule_cron" value="0 2 * * *" required />
+          </div>
+          <div>
+            <label class="form-label small mb-1" for="binding-policy-input">Policy (JSON)</label>
+            <textarea class="form-control" id="binding-policy-input" name="policy" rows="5" placeholder='e.g. {"retention_days":30,"dest_prefix":"daily","encryption":{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}}'></textarea>
+          </div>
+          <div class="d-flex gap-2 flex-wrap pt-2 border-top">
+            <button class="btn btn-primary" id="binding-submit-btn" type="submit">Create Binding</button>
+            <button class="btn btn-outline-secondary" id="test-binding-btn" type="button">Test Binding</button>
+            <button class="btn btn-outline-secondary ms-auto" type="button" data-bs-dismiss="offcanvas">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <div class="modal fade" id="settings-modal" tabindex="-1" aria-labelledby="settings-modal-label" aria-hidden="true">
       <div class="modal-dialog">
