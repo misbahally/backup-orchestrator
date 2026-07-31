@@ -14,7 +14,28 @@
     <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
   </head>
   <body>
-    <nav class="navbar navbar-expand-lg bg-body-tertiary border-bottom sticky-top">
+    <div id="login-screen" class="d-flex align-items-center justify-content-center vh-100">
+      <div class="card border-0 shadow-sm" style="width: 100%; max-width: 380px;">
+        <div class="card-body p-4">
+          <h1 class="h4 mb-1 text-center">Backup Control Plane</h1>
+          <p class="text-body-secondary small text-center mb-4">Sign in to continue</p>
+          <form id="login-form" class="vstack gap-3">
+            <div>
+              <label class="form-label small mb-1" for="login-username-input">Username</label>
+              <input class="form-control" id="login-username-input" name="username" autocomplete="username" required />
+            </div>
+            <div>
+              <label class="form-label small mb-1" for="login-password-input">Password</label>
+              <input class="form-control" id="login-password-input" name="password" type="password" autocomplete="current-password" required />
+            </div>
+            <div id="login-error" class="text-danger small d-none"></div>
+            <button class="btn btn-primary w-100" type="submit">Sign in</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <nav id="app-nav" class="navbar navbar-expand-lg bg-body-tertiary border-bottom sticky-top d-none">
       <div class="container-fluid px-4">
         <span class="navbar-brand fw-semibold">Backup Control Plane</span>
         <button
@@ -29,7 +50,7 @@
           <span class="navbar-toggler-icon"></span>
         </button>
         <div class="collapse navbar-collapse" id="mainNav">
-          <ul class="navbar-nav ms-auto mb-2 mb-lg-0" id="main-nav-list">
+          <ul class="navbar-nav ms-auto mb-2 mb-lg-0 align-items-lg-center" id="main-nav-list">
             <li class="nav-item">
               <button class="nav-link active btn btn-link" data-view="topology-view" type="button">Topology Map</button>
             </li>
@@ -39,17 +60,32 @@
             <li class="nav-item">
               <button class="nav-link btn btn-link" data-view="operations-view" type="button">Run Operations</button>
             </li>
+            <li class="nav-item ms-lg-2">
+              <button class="btn btn-outline-secondary btn-sm" id="theme-toggle-btn" type="button" title="Toggle dark mode" aria-label="Toggle dark mode">
+                <span id="theme-toggle-icon">&#9789;</span>
+              </button>
+            </li>
+            <li class="nav-item ms-lg-2">
+              <button class="btn btn-outline-secondary btn-sm" id="open-settings-btn" type="button" title="Connection settings" aria-label="Connection settings">
+                &#9881;&#65039; Settings
+              </button>
+            </li>
+            <li class="nav-item ms-lg-2">
+              <button class="btn btn-outline-secondary btn-sm" id="logout-btn" type="button" title="Log out" aria-label="Log out">
+                Logout
+              </button>
+            </li>
           </ul>
         </div>
       </div>
     </nav>
 
-    <main class="container-fluid px-4 py-4">
-      <div class="alert d-none" id="flash" role="alert"></div>
+    <main id="app-main" class="container-fluid px-4 py-4 d-none">
+      <div class="toast-container position-fixed top-0 end-0 p-3" id="toast-container" style="z-index: 1080"></div>
 
       <section id="topology-view" class="app-view">
         <div class="card border-0 shadow-sm">
-          <div class="card-header bg-white border-0 pt-4 pb-0 px-4">
+          <div class="card-header bg-body border-0 pt-4 pb-0 px-4">
             <h2 class="h4 mb-1">Topology Map</h2>
             <p class="text-body-secondary mb-3">Live view of configured source-to-destination links.</p>
           </div>
@@ -61,7 +97,7 @@
 
       <section id="configuration-view" class="app-view d-none">
         <div class="card border-0 shadow-sm mb-4">
-          <div class="card-header bg-white border-0 pt-4 pb-0 px-4">
+          <div class="card-header bg-body border-0 pt-4 pb-0 px-4">
             <h2 class="h4 mb-1">Configuration Hub</h2>
             <p class="text-body-secondary mb-3">Manage sources, destinations, and binding rules.</p>
           </div>
@@ -85,30 +121,41 @@
                   <p class="text-body-secondary small mb-2">Choose the source type and fill in the S3 connection details below.</p>
                   <form id="source-form" class="vstack gap-3">
                     <input type="hidden" name="is_active" value="true" />
-                    <input class="form-control" name="name" placeholder="Source Name" required />
-                    <select class="form-select" name="source_type" required>
-                      <option value="s3">s3</option>
-                      <option value="mysql">mysql</option>
-                      <option value="postgresql">postgresql</option>
-                      <option value="file">file</option>
-                    </select>
-                    <div id="s3-settings-panel" class="border rounded p-3 bg-light d-none">
+                    <div>
+                      <label class="form-label small mb-1" for="source-name-input">Source Name</label>
+                      <input class="form-control" id="source-name-input" name="name" placeholder="e.g. Primary Postgres" required />
+                    </div>
+                    <div>
+                      <label class="form-label small mb-1" for="source-type-input">Source Type</label>
+                      <select class="form-select" id="source-type-input" name="source_type" required>
+                        <option value="s3">s3</option>
+                        <option value="mysql">mysql</option>
+                        <option value="postgresql">postgresql</option>
+                        <option value="file">file</option>
+                      </select>
+                    </div>
+                    <div id="s3-settings-panel" class="border rounded p-3 bg-body-tertiary d-none">
                       <div class="fw-semibold small mb-2">S3 connection details</div>
                       <div class="row g-2">
                         <div class="col-md-6">
-                          <input class="form-control form-control-sm" name="s3_bucket" placeholder="Bucket" />
+                          <label class="form-label small mb-1">Bucket</label>
+                          <input class="form-control form-control-sm" name="s3_bucket" placeholder="my-backup-bucket" />
                         </div>
                         <div class="col-md-6">
-                          <input class="form-control form-control-sm" name="s3_prefix" placeholder="Prefix" />
+                          <label class="form-label small mb-1">Prefix</label>
+                          <input class="form-control form-control-sm" name="s3_prefix" placeholder="backups/" />
                         </div>
                         <div class="col-md-6">
-                          <input class="form-control form-control-sm" name="s3_region" placeholder="Region" value="us-east-1" />
+                          <label class="form-label small mb-1">Region</label>
+                          <input class="form-control form-control-sm" name="s3_region" placeholder="us-east-1" value="us-east-1" />
                         </div>
                         <div class="col-md-6">
-                          <input class="form-control form-control-sm" name="s3_endpoint" placeholder="Endpoint" />
+                          <label class="form-label small mb-1">Endpoint</label>
+                          <input class="form-control form-control-sm" name="s3_endpoint" placeholder="https://s3.amazonaws.com" />
                         </div>
                         <div class="col-12">
-                          <input class="form-control form-control-sm" name="s3_secret_ref" placeholder="Secret Ref" />
+                          <label class="form-label small mb-1">Secret Ref</label>
+                          <input class="form-control form-control-sm" name="s3_secret_ref" placeholder="vault path or secret name" />
                         </div>
                         <div class="col-12">
                           <label class="form-label small mb-1">Encryption</label>
@@ -120,59 +167,73 @@
                           </select>
                         </div>
                         <div class="col-md-6">
+                          <label class="form-label small mb-1">KMS Key ID</label>
                           <input class="form-control form-control-sm" name="s3_kms_key_id" placeholder="KMS Key ID" />
                         </div>
                         <div class="col-md-6">
+                          <label class="form-label small mb-1">KMS Key ARN</label>
                           <input class="form-control form-control-sm" name="s3_kms_key_arn" placeholder="KMS Key ARN" />
                         </div>
                         <div class="col-12">
+                          <label class="form-label small mb-1">Customer Key Ref</label>
                           <input class="form-control form-control-sm" name="s3_customer_key_ref" placeholder="Customer Key Ref" />
                         </div>
                       </div>
                     </div>
-                    <div id="database-settings-panel" class="border rounded p-3 bg-light d-none">
+                    <div id="database-settings-panel" class="border rounded p-3 bg-body-tertiary d-none">
                       <div class="fw-semibold small mb-2">Database connection details</div>
                       <div class="row g-2">
                         <div class="col-md-6">
-                          <input class="form-control form-control-sm" name="db_host" placeholder="Host" />
+                          <label class="form-label small mb-1">Host</label>
+                          <input class="form-control form-control-sm" name="db_host" placeholder="db.internal" />
                         </div>
                         <div class="col-md-6">
-                          <input class="form-control form-control-sm" name="db_port" placeholder="Port" />
+                          <label class="form-label small mb-1">Port</label>
+                          <input class="form-control form-control-sm" name="db_port" placeholder="5432" />
                         </div>
                         <div class="col-md-6">
-                          <input class="form-control form-control-sm" name="db_database" placeholder="Database" />
+                          <label class="form-label small mb-1">Database</label>
+                          <input class="form-control form-control-sm" name="db_database" placeholder="app_production" />
                         </div>
                         <div class="col-md-6">
-                          <input class="form-control form-control-sm" name="db_username" placeholder="Username" />
+                          <label class="form-label small mb-1">Username</label>
+                          <input class="form-control form-control-sm" name="db_username" placeholder="backup_user" />
                         </div>
                         <div class="col-12">
-                          <input class="form-control form-control-sm" name="db_password" placeholder="Password" />
+                          <label class="form-label small mb-1">Password</label>
+                          <input class="form-control form-control-sm" type="password" name="db_password" placeholder="••••••••" autocomplete="new-password" />
                         </div>
                         <div class="col-12">
-                          <input class="form-control form-control-sm" name="db_secret_ref" placeholder="Secret Ref" />
+                          <label class="form-label small mb-1">Secret Ref</label>
+                          <input class="form-control form-control-sm" name="db_secret_ref" placeholder="vault path or secret name" />
                         </div>
                       </div>
                     </div>
-                    <div id="file-settings-panel" class="border rounded p-3 bg-light d-none">
+                    <div id="file-settings-panel" class="border rounded p-3 bg-body-tertiary d-none">
                       <div class="fw-semibold small mb-2">Filesystem source details</div>
                       <div class="row g-2">
                         <div class="col-12">
+                          <label class="form-label small mb-1">Root Path</label>
                           <input class="form-control form-control-sm" name="file_root_path" placeholder="Root path inside worker container (e.g. /data)" />
                         </div>
                         <div class="col-12">
-                          <input class="form-control form-control-sm" name="file_include_globs" placeholder="Include globs (comma separated), e.g. **/*.sql, **/*.gz" />
+                          <label class="form-label small mb-1">Include Globs</label>
+                          <input class="form-control form-control-sm" name="file_include_globs" placeholder="Comma separated, e.g. **/*.sql, **/*.gz" />
                         </div>
                         <div class="col-12">
-                          <input class="form-control form-control-sm" name="file_exclude_globs" placeholder="Exclude globs (comma separated), e.g. **/*.tmp" />
+                          <label class="form-label small mb-1">Exclude Globs</label>
+                          <input class="form-control form-control-sm" name="file_exclude_globs" placeholder="Comma separated, e.g. **/*.tmp" />
                         </div>
                         <div class="col-md-6">
+                          <label class="form-label small mb-1">Symlinks</label>
                           <select class="form-select form-select-sm" name="file_follow_symlinks">
                             <option value="false">Do not follow symlinks</option>
                             <option value="true">Follow symlinks</option>
                           </select>
                         </div>
                         <div class="col-md-6">
-                          <input class="form-control form-control-sm" name="file_key_prefix" placeholder="S3 key prefix (optional)" />
+                          <label class="form-label small mb-1">S3 Key Prefix</label>
+                          <input class="form-control form-control-sm" name="file_key_prefix" placeholder="Optional" />
                         </div>
                       </div>
                     </div>
@@ -214,22 +275,32 @@
                   <p class="text-body-secondary small mb-2">Fill in the S3 destination details below. The backend will still send them as normal destination fields.</p>
                   <form id="destination-form" class="vstack gap-3">
                     <input type="hidden" name="is_active" value="true" />
-                    <input class="form-control" name="name" placeholder="Destination Name" required />
-                    <input class="form-control" name="provider" placeholder="Provider" value="s3-compatible" required readonly style="background-color: #e9ecef;" />
-                    <div class="border rounded p-3 bg-light">
+                    <div>
+                      <label class="form-label small mb-1" for="destination-name-input">Destination Name</label>
+                      <input class="form-control" id="destination-name-input" name="name" placeholder="e.g. Offsite Archive" required />
+                    </div>
+                    <div>
+                      <label class="form-label small mb-1" for="destination-provider-input">Provider</label>
+                      <input class="form-control" id="destination-provider-input" name="provider" value="s3-compatible" required readonly style="background-color: var(--bs-secondary-bg);" />
+                    </div>
+                    <div class="border rounded p-3 bg-body-tertiary">
                       <div class="fw-semibold small mb-2">S3 connection details</div>
                       <div class="row g-2">
                         <div class="col-md-6">
-                          <input class="form-control form-control-sm" name="endpoint" placeholder="Endpoint" />
+                          <label class="form-label small mb-1">Endpoint</label>
+                          <input class="form-control form-control-sm" name="endpoint" placeholder="https://s3.amazonaws.com" />
                         </div>
                         <div class="col-md-6">
-                          <input class="form-control form-control-sm" name="bucket" placeholder="Bucket" />
+                          <label class="form-label small mb-1">Bucket</label>
+                          <input class="form-control form-control-sm" name="bucket" placeholder="my-offsite-bucket" />
                         </div>
                         <div class="col-md-6">
-                          <input class="form-control form-control-sm" name="region" placeholder="Region" value="us-east-1" />
+                          <label class="form-label small mb-1">Region</label>
+                          <input class="form-control form-control-sm" name="region" placeholder="us-east-1" value="us-east-1" />
                         </div>
                         <div class="col-md-6">
-                          <input class="form-control form-control-sm" name="secret_ref" placeholder="Secret Ref" />
+                          <label class="form-label small mb-1">Secret Ref</label>
+                          <input class="form-control form-control-sm" name="secret_ref" placeholder="vault path or secret name" />
                         </div>
                         <div class="col-12">
                           <label class="form-label small mb-1">Encryption</label>
@@ -241,12 +312,15 @@
                           </select>
                         </div>
                         <div class="col-md-6">
+                          <label class="form-label small mb-1">KMS Key ID</label>
                           <input class="form-control form-control-sm" name="destination_kms_key_id" placeholder="KMS Key ID" />
                         </div>
                         <div class="col-md-6">
+                          <label class="form-label small mb-1">KMS Key ARN</label>
                           <input class="form-control form-control-sm" name="destination_kms_key_arn" placeholder="KMS Key ARN" />
                         </div>
                         <div class="col-12">
+                          <label class="form-label small mb-1">Customer Key Ref</label>
                           <input class="form-control form-control-sm" name="destination_customer_key_ref" placeholder="Customer Key Ref" />
                         </div>
                       </div>
@@ -288,10 +362,22 @@
                   <h3 class="h5">Create Binding</h3>
                   <p class="text-body-secondary small mb-2">Put source encryption under <code>settings.encryption</code> and destination encryption under <code>policy.encryption</code>. Example: <code>{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}</code>.</p>
                   <form id="binding-form" class="vstack gap-3">
-                    <select class="form-select" name="source_id" id="source-select" required></select>
-                    <select class="form-select" name="destination_id" id="destination-select" required></select>
-                    <input class="form-control" name="schedule_cron" value="0 2 * * *" required />
-                    <textarea class="form-control" name="policy" placeholder='Policy JSON, e.g. {"retention_days":30,"dest_prefix":"daily","encryption":{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}}'></textarea>
+                    <div>
+                      <label class="form-label small mb-1" for="source-select">Source</label>
+                      <select class="form-select" name="source_id" id="source-select" required></select>
+                    </div>
+                    <div>
+                      <label class="form-label small mb-1" for="destination-select">Destination</label>
+                      <select class="form-select" name="destination_id" id="destination-select" required></select>
+                    </div>
+                    <div>
+                      <label class="form-label small mb-1" for="schedule-cron-input">Schedule (cron)</label>
+                      <input class="form-control" id="schedule-cron-input" name="schedule_cron" value="0 2 * * *" required />
+                    </div>
+                    <div>
+                      <label class="form-label small mb-1" for="binding-policy-input">Policy (JSON)</label>
+                      <textarea class="form-control" id="binding-policy-input" name="policy" placeholder='e.g. {"retention_days":30,"dest_prefix":"daily","encryption":{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}}'></textarea>
+                    </div>
                     <div class="d-flex gap-2 flex-wrap">
                       <button class="btn btn-primary" id="binding-submit-btn" type="submit">Create Binding</button>
                       <button class="btn btn-outline-secondary d-none" id="binding-cancel-edit-btn" type="button">Cancel Edit</button>
@@ -329,7 +415,7 @@
 
       <section id="operations-view" class="app-view d-none">
         <div class="card border-0 shadow-sm mb-4">
-          <div class="card-header bg-white border-0 pt-4 pb-0 px-4 d-flex justify-content-between align-items-center">
+          <div class="card-header bg-body border-0 pt-4 pb-0 px-4 d-flex justify-content-between align-items-center">
             <div>
               <h2 class="h4 mb-1">Run Operations</h2>
               <p class="text-body-secondary mb-3">Track execution status and recent backup outcomes.</p>
@@ -361,7 +447,7 @@
           </div>
         </div>
         <div class="card border-0 shadow-sm">
-          <div class="card-header bg-white border-0 pt-4 pb-0 px-4">
+          <div class="card-header bg-body border-0 pt-4 pb-0 px-4">
             <h3 class="h5 mb-1">Validation & Diagnostics</h3>
             <p class="text-body-secondary mb-3">Most recent validation result and run detail inspection.</p>
           </div>
@@ -372,6 +458,57 @@
         </div>
       </section>
     </main>
+
+    <div class="modal fade" id="settings-modal" tabindex="-1" aria-labelledby="settings-modal-label" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <form id="settings-form">
+            <div class="modal-header">
+              <h5 class="modal-title" id="settings-modal-label">Connection Settings</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body vstack gap-3">
+              <div>
+                <label class="form-label small mb-1" for="settings-api-base-input">API Base URL</label>
+                <input class="form-control" id="settings-api-base-input" name="api_base_url" placeholder="/api" />
+                <div class="form-text">Changing this reloads the page.</div>
+              </div>
+              <div>
+                <label class="form-label small mb-1" for="settings-api-key-input">API Key</label>
+                <input class="form-control" id="settings-api-key-input" name="api_key" type="password" autocomplete="off" placeholder="Enter API key" />
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+          </form>
+          <hr class="my-0" />
+          <form id="change-password-form">
+            <div class="modal-header border-0 pb-0">
+              <h6 class="modal-title mb-0">Change Password</h6>
+            </div>
+            <div class="modal-body vstack gap-3 pt-2">
+              <div>
+                <label class="form-label small mb-1" for="current-password-input">Current Password</label>
+                <input class="form-control" id="current-password-input" name="current_password" type="password" autocomplete="current-password" required />
+              </div>
+              <div>
+                <label class="form-label small mb-1" for="new-password-input">New Password</label>
+                <input class="form-control" id="new-password-input" name="new_password" type="password" autocomplete="new-password" minlength="8" required />
+              </div>
+              <div>
+                <label class="form-label small mb-1" for="confirm-password-input">Confirm New Password</label>
+                <input class="form-control" id="confirm-password-input" name="confirm_password" type="password" autocomplete="new-password" minlength="8" required />
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="submit" class="btn btn-outline-primary">Change Password</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
 
     <script
       src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"

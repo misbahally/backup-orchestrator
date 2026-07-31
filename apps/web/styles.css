@@ -7,14 +7,15 @@ body {
   min-height: 240px;
 }
 
-#flash {
-  position: sticky;
-  top: 80px;
-  z-index: 1020;
-}
-
 code {
   white-space: nowrap;
+}
+
+.table-loading-row td,
+.table-empty-row td {
+  color: var(--bs-secondary-color);
+  text-align: center;
+  padding: 1.25rem 0.5rem;
 }
 
 @media (max-width: 768px) {

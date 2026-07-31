@@ -13,6 +13,9 @@ sys.path.insert(0, str(ROOT / "apps" / "worker"))
 
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{ROOT / '.pytest_cache' / 'backup_control.sqlite'}")
 os.environ.setdefault("FILE_SOURCE_ALLOWED_ROOTS", str(ROOT / "tests"))
+os.environ.setdefault("API_KEYS", "test-key")
+
+TEST_API_HEADERS = {"X-API-Key": "test-key"}
 
 from app.database import Base as ApiBase
 from app.database import engine as api_engine
@@ -47,7 +50,7 @@ class FakeS3Client:
 def test_validation_endpoints_return_structured_results(monkeypatch):
     monkeypatch.setattr(api_main, "_make_s3_client", lambda region, endpoint, creds: FakeS3Client())
 
-    client = TestClient(api_app)
+    client = TestClient(api_app, headers=TEST_API_HEADERS)
     response = client.post(
         "/validate/source",
         json={
@@ -62,7 +65,7 @@ def test_validation_endpoints_return_structured_results(monkeypatch):
 
 
 def test_cron_validation_rejects_invalid_expression():
-    client = TestClient(api_app)
+    client = TestClient(api_app, headers=TEST_API_HEADERS)
 
     src = client.post(
         "/sources",
@@ -81,7 +84,7 @@ def test_cron_validation_rejects_invalid_expression():
 
 
 def test_legacy_source_types_are_rejected():
-    client = TestClient(api_app)
+    client = TestClient(api_app, headers=TEST_API_HEADERS)
     response = client.post(
         "/sources",
         json={"name": "legacy", "source_type": "efs", "settings": {}},
@@ -90,7 +93,7 @@ def test_legacy_source_types_are_rejected():
 
 
 def test_file_source_allowlist_check():
-    client = TestClient(api_app)
+    client = TestClient(api_app, headers=TEST_API_HEADERS)
     response = client.post(
         "/validate/source",
         json={

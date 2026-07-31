@@ -1,23 +1,58 @@
-const API_BASE = localStorage.getItem("api_base_url") || "/api";
+let apiBase = localStorage.getItem("api_base_url") || "/api";
+let sessionToken = localStorage.getItem("session_token") || "";
+let appInitialized = false;
 let editingBindingId = null;
 let editingSourceId = null;
 let editingDestinationId = null;
+let lastSources = [];
+let lastDestinations = [];
 
-async function api(path, options = {}) {
-  const apiKey = localStorage.getItem("api_key") || "";
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]
+  ));
+}
+
+function getAuthHeaders() {
   const headers = { "Content-Type": "application/json" };
+  const apiKey = localStorage.getItem("api_key") || "";
   if (apiKey) {
     headers["X-API-Key"] = apiKey;
   }
-  const resp = await fetch(`${API_BASE}${path}`, {
+  if (sessionToken) {
+    headers["Authorization"] = `Bearer ${sessionToken}`;
+  }
+  return headers;
+}
+
+function showLoginScreen() {
+  document.getElementById("login-screen").classList.remove("d-none");
+  document.getElementById("app-nav").classList.add("d-none");
+  document.getElementById("app-main").classList.add("d-none");
+}
+
+function showAppShell() {
+  document.getElementById("login-screen").classList.add("d-none");
+  document.getElementById("app-nav").classList.remove("d-none");
+  document.getElementById("app-main").classList.remove("d-none");
+}
+
+function clearSession() {
+  sessionToken = "";
+  appInitialized = false;
+  localStorage.removeItem("session_token");
+}
+
+async function api(path, options = {}) {
+  const headers = getAuthHeaders();
+  const resp = await fetch(`${apiBase}${path}`, {
     headers,
     ...options,
   });
   if (resp.status === 401) {
-    const token = window.prompt("Enter API key", apiKey);
-    if (token !== null) {
-      localStorage.setItem("api_key", token.trim());
-    }
+    clearSession();
+    showLoginScreen();
+    throw new Error("Authentication required. Please log in again.");
   }
   if (!resp.ok) {
     const txt = await resp.text();
@@ -35,11 +70,22 @@ function parseJsonOrEmpty(value) {
 }
 
 function setFlash(message, kind = "success") {
-  const flash = document.getElementById("flash");
-  flash.className = `alert alert-${kind}`;
-  flash.textContent = message;
-  flash.classList.remove("d-none");
-  setTimeout(() => flash.classList.add("d-none"), 2500);
+  const container = document.getElementById("toast-container");
+  const toastEl = document.createElement("div");
+  toastEl.className = `toast align-items-center text-bg-${kind} border-0`;
+  toastEl.setAttribute("role", "alert");
+  toastEl.setAttribute("aria-live", "assertive");
+  toastEl.setAttribute("aria-atomic", "true");
+  toastEl.innerHTML = `
+    <div class="d-flex">
+      <div class="toast-body">${escapeHtml(message)}</div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+    </div>
+  `;
+  container.appendChild(toastEl);
+  const toast = new bootstrap.Toast(toastEl, { delay: kind === "danger" ? 8000 : 3500 });
+  toastEl.addEventListener("hidden.bs.toast", () => toastEl.remove());
+  toast.show();
 }
 
 function renderValidationCard(container, title, result) {
@@ -49,15 +95,43 @@ function renderValidationCard(container, title, result) {
     <div class="card-body">
       <div class="d-flex justify-content-between align-items-start gap-2">
         <div>
-          <h4 class="h6 mb-1">${title}</h4>
-          <div class="text-muted small">${result?.message || "No output"}</div>
+          <h4 class="h6 mb-1">${escapeHtml(title)}</h4>
+          <div class="text-muted small">${escapeHtml(result?.message || "No output")}</div>
         </div>
         <span class="badge text-bg-${result?.ok ? "success" : "danger"}">${result?.ok ? "ok" : "error"}</span>
       </div>
-      ${result?.details ? `<pre class="small mt-3 mb-0">${JSON.stringify(result.details, null, 2)}</pre>` : ""}
+      ${result?.details ? `<pre class="small mt-3 mb-0">${escapeHtml(JSON.stringify(result.details, null, 2))}</pre>` : ""}
     </div>
   `;
   container.appendChild(card);
+}
+
+function openSettingsModal() {
+  const form = document.getElementById("settings-form");
+  form.querySelector("[name='api_base_url']").value = apiBase;
+  form.querySelector("[name='api_key']").value = localStorage.getItem("api_key") || "";
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("settings-modal")).show();
+}
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-bs-theme", theme);
+  const icon = document.getElementById("theme-toggle-icon");
+  if (icon) {
+    icon.innerHTML = theme === "dark" ? "&#9788;" : "&#9789;";
+  }
+}
+
+function initTheme() {
+  const stored = localStorage.getItem("theme");
+  const preferred = stored || (window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  applyTheme(preferred);
+}
+
+function toggleTheme() {
+  const current = document.documentElement.getAttribute("data-bs-theme") === "dark" ? "dark" : "light";
+  const next = current === "dark" ? "light" : "dark";
+  localStorage.setItem("theme", next);
+  applyTheme(next);
 }
 
 function badgeForStatus(status) {
@@ -69,7 +143,7 @@ function badgeForStatus(status) {
     cancelled: "warning",
   };
   const tone = map[String(status || "").toLowerCase()] || "secondary";
-  return `<span class="badge text-bg-${tone}">${status}</span>`;
+  return `<span class="badge text-bg-${tone}">${escapeHtml(status)}</span>`;
 }
 
 function getBindingPayloadFromForm() {
@@ -339,12 +413,16 @@ function showConfigView(panelId) {
 function renderSourcesTable(sources) {
   const body = document.getElementById("sources-body");
   body.innerHTML = "";
+  if (!sources.length) {
+    body.innerHTML = `<tr class="table-empty-row"><td colspan="7">No sources yet — create one on the left.</td></tr>`;
+    return;
+  }
   for (const s of sources) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${s.id}</td>
-      <td>${s.name}</td>
-      <td>${s.source_type}</td>
+      <td>${escapeHtml(s.name)}</td>
+      <td>${escapeHtml(s.source_type)}</td>
       <td>${s.is_active ? "yes" : "no"}</td>
       <td><button class="btn btn-sm btn-outline-secondary edit-source-row" data-source-id="${s.id}" type="button">Edit</button></td>
       <td><button class="btn btn-sm btn-outline-danger delete-source-row" data-source-id="${s.id}" type="button">Delete</button></td>
@@ -400,13 +478,17 @@ function renderSourcesTable(sources) {
 function renderDestinationsTable(destinations) {
   const body = document.getElementById("destinations-body");
   body.innerHTML = "";
+  if (!destinations.length) {
+    body.innerHTML = `<tr class="table-empty-row"><td colspan="7">No destinations yet — create one on the left.</td></tr>`;
+    return;
+  }
   for (const d of destinations) {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${d.id}</td>
-      <td>${d.name}</td>
-      <td>${d.provider}</td>
-      <td>${d.bucket}</td>
+      <td>${escapeHtml(d.name)}</td>
+      <td>${escapeHtml(d.provider)}</td>
+      <td>${escapeHtml(d.bucket)}</td>
       <td><button class="btn btn-sm btn-outline-secondary edit-destination-row" data-destination-id="${d.id}" type="button">Edit</button></td>
       <td><button class="btn btn-sm btn-outline-danger delete-destination-row" data-destination-id="${d.id}" type="button">Delete</button></td>
       <td><button class="btn btn-sm btn-outline-secondary test-destination-row" data-destination-id="${d.id}" type="button">Test</button></td>
@@ -464,13 +546,21 @@ function renderDestinationsTable(destinations) {
 function renderBindingsTable(bindings) {
   const body = document.getElementById("bindings-body");
   body.innerHTML = "";
+  if (!bindings.length) {
+    body.innerHTML = `<tr class="table-empty-row"><td colspan="8">No bindings yet — create one on the left.</td></tr>`;
+    return;
+  }
+  const sourceById = new Map(lastSources.map((s) => [s.id, s]));
+  const destinationById = new Map(lastDestinations.map((d) => [d.id, d]));
   for (const b of bindings) {
     const tr = document.createElement("tr");
+    const sourceLabel = sourceById.has(b.source_id) ? `${escapeHtml(sourceById.get(b.source_id).name)} (#${b.source_id})` : `#${b.source_id}`;
+    const destinationLabel = destinationById.has(b.destination_id) ? `${escapeHtml(destinationById.get(b.destination_id).name)} (#${b.destination_id})` : `#${b.destination_id}`;
     tr.innerHTML = `
       <td>${b.id}</td>
-      <td>${b.source_id}</td>
-      <td>${b.destination_id}</td>
-      <td><code>${b.schedule_cron}</code></td>
+      <td>${sourceLabel}</td>
+      <td>${destinationLabel}</td>
+      <td><code>${escapeHtml(b.schedule_cron)}</code></td>
       <td><button class="btn btn-sm btn-outline-primary trigger-run" data-binding-id="${b.id}" type="button">Trigger</button></td>
       <td><button class="btn btn-sm btn-outline-secondary edit-binding" data-binding-id="${b.id}" type="button">Edit</button></td>
       <td><button class="btn btn-sm btn-outline-danger delete-binding" data-binding-id="${b.id}" type="button">Delete</button></td>
@@ -539,10 +629,17 @@ function renderBindingsTable(bindings) {
 }
 
 async function refreshSelectors() {
+  const sourcesBody = document.getElementById("sources-body");
+  const destinationsBody = document.getElementById("destinations-body");
+  sourcesBody.innerHTML = `<tr class="table-loading-row"><td colspan="7">Loading sources…</td></tr>`;
+  destinationsBody.innerHTML = `<tr class="table-loading-row"><td colspan="7">Loading destinations…</td></tr>`;
+
   const [sources, destinations] = await Promise.all([
     api("/sources"),
     api("/destinations"),
   ]);
+  lastSources = sources;
+  lastDestinations = destinations;
 
   const sourceSel = document.getElementById("source-select");
   const destSel = document.getElementById("destination-select");
@@ -613,16 +710,37 @@ async function refreshTopology() {
 }
 
 async function refreshBindings() {
+  const body = document.getElementById("bindings-body");
+  body.innerHTML = `<tr class="table-loading-row"><td colspan="8">Loading bindings…</td></tr>`;
   const bindings = await api("/bindings");
   renderBindingsTable(bindings);
 }
 
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = n;
+  let unitIndex = -1;
+  do {
+    value /= 1024;
+    unitIndex += 1;
+  } while (value >= 1024 && unitIndex < units.length - 1);
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
+}
+
 async function refreshRuns() {
-  const runs = await api("/runs");
   const body = document.getElementById("runs-body");
+  body.innerHTML = `<tr class="table-loading-row"><td colspan="9">Loading runs…</td></tr>`;
+  const runs = await api("/runs");
   body.innerHTML = "";
   const selectAll = document.getElementById("select-all-runs");
   selectAll.checked = false;
+
+  if (!runs.length) {
+    body.innerHTML = `<tr class="table-empty-row"><td colspan="9">No runs yet — trigger a binding to see results here.</td></tr>`;
+    return;
+  }
 
   for (const run of runs) {
     const cancellable = ["queued", "running"].includes(String(run.status).toLowerCase());
@@ -632,10 +750,10 @@ async function refreshRuns() {
       <td><a href="#" class="text-decoration-none" data-run-id="${run.id}">${run.id}</a></td>
       <td>${run.binding_id}</td>
       <td>${badgeForStatus(run.status)}</td>
-      <td>${run.started_at || ""}</td>
-      <td>${run.finished_at || ""}</td>
-      <td>${run.bytes_transferred}</td>
-      <td>${run.message || ""}</td>
+      <td>${escapeHtml(run.started_at || "")}</td>
+      <td>${escapeHtml(run.finished_at || "")}</td>
+      <td>${formatBytes(run.bytes_transferred)}</td>
+      <td>${escapeHtml(run.message || "")}</td>
       <td><button class="btn btn-sm btn-outline-danger cancel-run" data-run-id="${run.id}" type="button" ${cancellable ? "" : "disabled"}>Cancel</button></td>
     `;
     body.appendChild(tr);
@@ -671,6 +789,27 @@ async function refreshRuns() {
 }
 
 async function boot() {
+  initTheme();
+
+  document.getElementById("theme-toggle-btn").addEventListener("click", toggleTheme);
+
+  document.getElementById("open-settings-btn").addEventListener("click", openSettingsModal);
+
+  document.getElementById("settings-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const newApiBase = String(form.querySelector("[name='api_base_url']").value || "/api").trim() || "/api";
+    const newApiKey = String(form.querySelector("[name='api_key']").value || "").trim();
+    localStorage.setItem("api_key", newApiKey);
+    bootstrap.Modal.getInstance(document.getElementById("settings-modal"))?.hide();
+    if (newApiBase !== apiBase) {
+      localStorage.setItem("api_base_url", newApiBase);
+      window.location.reload();
+      return;
+    }
+    setFlash("Settings saved");
+  });
+
   document.querySelectorAll("#main-nav-list .nav-link").forEach((btn) => {
     btn.addEventListener("click", async () => {
       showMainView(btn.dataset.view);
@@ -848,21 +987,109 @@ async function boot() {
     }
   });
 
-  await refreshSelectors();
-  await refreshBindings();
-  await refreshTopology();
-  await refreshRuns();
+  async function loadInitialData() {
+    await refreshSelectors();
+    await refreshBindings();
+    await refreshTopology();
+    await refreshRuns();
 
-  window.setInterval(async () => {
-    if (document.visibilityState !== "visible") {
+    window.setInterval(async () => {
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      const operationsView = document.getElementById("operations-view");
+      if (!operationsView.classList.contains("d-none")) {
+        await refreshRuns();
+        await refreshTopology();
+      }
+    }, 10000);
+  }
+
+  async function enterApp() {
+    if (appInitialized) {
       return;
     }
-    const operationsView = document.getElementById("operations-view");
-    if (!operationsView.classList.contains("d-none")) {
-      await refreshRuns();
-      await refreshTopology();
+    appInitialized = true;
+    showAppShell();
+    await loadInitialData();
+  }
+
+  document.getElementById("login-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const username = form.querySelector("[name='username']").value.trim();
+    const password = form.querySelector("[name='password']").value;
+    const errorEl = document.getElementById("login-error");
+    errorEl.classList.add("d-none");
+    try {
+      const resp = await fetch(`${apiBase}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!resp.ok) {
+        throw new Error(resp.status === 401 ? "Invalid username or password" : `HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      sessionToken = data.token;
+      localStorage.setItem("session_token", sessionToken);
+      form.reset();
+      await enterApp();
+    } catch (err) {
+      errorEl.textContent = err.message;
+      errorEl.classList.remove("d-none");
     }
-  }, 10000);
+  });
+
+  document.getElementById("logout-btn").addEventListener("click", async () => {
+    try {
+      await fetch(`${apiBase}/auth/logout`, { method: "POST", headers: getAuthHeaders() });
+    } catch (err) {
+      // ignore network errors during logout, still clear the local session
+    }
+    clearSession();
+    showLoginScreen();
+  });
+
+  document.getElementById("change-password-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const currentPassword = form.querySelector("[name='current_password']").value;
+    const newPassword = form.querySelector("[name='new_password']").value;
+    const confirmPassword = form.querySelector("[name='confirm_password']").value;
+    if (newPassword !== confirmPassword) {
+      setFlash("New password and confirmation do not match", "danger");
+      return;
+    }
+    try {
+      await api("/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+      });
+      setFlash("Password changed successfully");
+      form.reset();
+      bootstrap.Modal.getInstance(document.getElementById("settings-modal"))?.hide();
+    } catch (err) {
+      setFlash(`Password change failed: ${err.message}`, "danger");
+    }
+  });
+
+  let sessionValid = false;
+  if (sessionToken) {
+    try {
+      const resp = await fetch(`${apiBase}/auth/me`, { headers: getAuthHeaders() });
+      sessionValid = resp.ok;
+    } catch (err) {
+      sessionValid = false;
+    }
+  }
+
+  if (sessionValid) {
+    await enterApp();
+  } else {
+    clearSession();
+    showLoginScreen();
+  }
 }
 
 boot().catch((err) => {

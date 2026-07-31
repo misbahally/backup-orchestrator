@@ -11,6 +11,7 @@ from croniter import croniter
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi import Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from pymysql import connect as mysql_connect
 from redis import Redis
@@ -21,15 +22,25 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import psycopg2
 
-from .auth import enforce_api_key
+from .auth import (
+    ADMIN_USERNAME,
+    create_session,
+    enforce_api_key,
+    hash_password,
+    revoke_session,
+    verify_password,
+)
 from .config import settings
 from .database import get_db
-from .models import BackupRun, Binding, Destination, RunStatus, Source, SourceType
+from .models import BackupRun, Binding, Destination, RunStatus, Source, SourceType, User
 from .schemas import (
     BindingCreate,
     BindingRead,
+    ChangePasswordRequest,
     DestinationCreate,
     DestinationRead,
+    LoginRequest,
+    LoginResponse,
     RunCancelRequest,
     RunRead,
     SourceCreate,
@@ -65,12 +76,15 @@ app.add_middleware(
 async def auth_and_metrics(request: Request, call_next):
     start = time.perf_counter()
     path = request.url.path
-    try:
-        enforce_api_key(request)
-    except HTTPException as exc:
-        REQUEST_COUNT.labels(request.method, path, str(exc.status_code)).inc()
+    auth_error = enforce_api_key(request)
+    if auth_error is not None:
+        REQUEST_COUNT.labels(request.method, path, str(auth_error.status_code)).inc()
         REQUEST_LATENCY.labels(request.method, path).observe(time.perf_counter() - start)
-        raise
+        return JSONResponse(
+            status_code=auth_error.status_code,
+            content={"detail": auth_error.detail},
+            headers=auth_error.headers,
+        )
 
     response = await call_next(request)
     REQUEST_COUNT.labels(request.method, path, str(response.status_code)).inc()
@@ -349,6 +363,40 @@ def _enqueue_run(run: BackupRun, q: Queue) -> BackupRun:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/auth/login", response_model=LoginResponse)
+def login(payload: LoginRequest, db: Session = Depends(get_db)) -> LoginResponse:
+    user = db.query(User).filter(User.username == payload.username).one_or_none()
+    if user is None or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="invalid username or password")
+    token = create_session(db, user)
+    return LoginResponse(token=token, username=user.username)
+
+
+@app.post("/auth/logout")
+def logout(request: Request, db: Session = Depends(get_db)) -> dict[str, bool]:
+    header = request.headers.get("Authorization", "")
+    if header.startswith("Bearer "):
+        revoke_session(db, header[len("Bearer ") :].strip())
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+def me() -> dict[str, str]:
+    return {"username": ADMIN_USERNAME}
+
+
+@app.post("/auth/change-password")
+def change_password(payload: ChangePasswordRequest, db: Session = Depends(get_db)) -> dict[str, bool]:
+    user = db.query(User).filter(User.username == ADMIN_USERNAME).one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="admin user not found")
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=401, detail="current password is incorrect")
+    user.password_hash = hash_password(payload.new_password)
+    db.commit()
+    return {"ok": True}
 
 
 @app.get("/metrics")

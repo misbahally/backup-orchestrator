@@ -22,6 +22,21 @@ If `API_KEYS` is set, include the header below in every request:
 X-API-Key: <your-key>
 ```
 
+If `API_KEYS` is not set, the API instead requires a signed-in session. Log in and use the
+returned token as a bearer token on subsequent requests:
+
+```bash
+curl -X POST http://localhost:8000/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin"}'
+
+curl -H 'Authorization: Bearer <token from login>' http://localhost:8000/topology
+```
+
+There is only a single built-in user, `admin`, seeded with the password `admin`. Change it
+immediately after first login via `POST /auth/change-password` (or the Settings dialog in the
+web UI).
+
 ## Health check
 
 ```bash

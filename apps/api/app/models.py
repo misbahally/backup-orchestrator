@@ -1,4 +1,14 @@
-from orchestrator_core.models import Base, BackupRun, Binding, Destination, RunStatus, Source, SourceType
+from orchestrator_core.models import (
+    Base,
+    BackupRun,
+    Binding,
+    Destination,
+    RunStatus,
+    Source,
+    SourceType,
+    User,
+    UserSession,
+)
 
 __all__ = [
     "BackupRun",
@@ -8,4 +18,6 @@ __all__ = [
     "RunStatus",
     "Source",
     "SourceType",
+    "User",
+    "UserSession",
 ]

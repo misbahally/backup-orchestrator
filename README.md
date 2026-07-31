@@ -48,6 +48,9 @@ docker compose up --build
 - MinIO API: `http://localhost:9000`
 - MinIO Console: `http://localhost:9001`
 
+The web UI is protected by a login screen. Sign in with the default account (`admin` /
+`admin`) and change the password from Settings → Change Password immediately after first login.
+
 ## Test with MinIO
 
 Use MinIO as a local S3-compatible destination for development/testing.
