@@ -1,13 +1,15 @@
-# Backup Control Plane (Work in Progress)
+# Backup Control Plane
 
-Service-oriented scaffold for a backup control plane:
+A service-oriented backup control plane for defining backup sources, destinations, and
+scheduled bindings, then executing and monitoring backup runs through a job queue.
 
 - `apps/api`: FastAPI control plane API (DB-backed config and run orchestration)
-- `apps/worker`: RQ worker that executes queued backup runs
-- `apps/web`: Separate frontend that visualizes source -> destination mappings
-- `legacy/`: previous LLM-generated implementation kept for reference only
+- `apps/worker`: RQ worker and cron-aware scheduler that execute queued backup runs
+- `apps/web`: static frontend that visualizes source -> destination mappings and run status
+- `libs/orchestrator_core`: shared SQLAlchemy models, database helpers, and secret
+  resolution used by both `apps/api` and `apps/worker`
 
-Each app now has its own Poetry environment:
+Each app has its own Poetry environment:
 - `apps/api/pyproject.toml`
 - `apps/worker/pyproject.toml`
 
@@ -16,8 +18,10 @@ Each app now has its own Poetry environment:
 - `postgres`: persistent metadata store
 - `redis`: job queue broker
 - `minio`: local S3-compatible object storage for testing
+- `migrate`: one-shot service that runs Alembic migrations before api/worker/scheduler start
 - `api`: REST API for configuration and run control
 - `worker`: async execution worker
+- `scheduler`: cron-aware loop that enqueues runs for active bindings
 - `web`: static web UI for topology and config visibility
 
 ## Quick Start
@@ -28,14 +32,15 @@ Each app now has its own Poetry environment:
 cp .env.example .env
 ```
 
-2. Install each service with Poetry using Python 3.13:
+2. (Optional, for local development outside Docker) install each app with Poetry using
+   Python 3.13:
 
 ```bash
 cd apps/api && poetry env use 3.13 && poetry install --no-root
 cd ../worker && poetry env use 3.13 && poetry install --no-root
 ```
 
-3. Start all services:
+3. Start all services (builds images, runs migrations, then starts api/worker/scheduler/web):
 
 ```bash
 docker compose up --build
@@ -84,19 +89,22 @@ export AWS_SECRET_ACCESS_KEY=minioadmin
 export AWS_DEFAULT_REGION=us-east-1
 ```
 
-## Current Scope
+## Features
 
-This scaffold provides:
-
-- DB-backed source/destination/binding configuration
-- Job queue integration with run state transitions
-- Topology visualization in a separate frontend service
-- Shared secret resolution for API and worker
-- Structured validation diagnostics and run detail inspection
-- Cron-aware scheduler entry point for active bindings
-- API key authentication support
+- DB-backed source/destination/binding configuration with Alembic-managed schema
+- Job queue integration (RQ/Redis) with retries and full run state transitions
+- Cron-aware scheduler that enqueues due bindings and guards against duplicate runs
+- Session + API key authentication for the API and web UI
 - Prometheus metrics endpoints for API/worker/scheduler
-- Source plugins for S3 copy, MySQL/PostgreSQL logical dump, filesystem copy, EBS snapshots, and RDS snapshots
+- Topology visualization in the web UI
+- Shared models, database access, and secret resolution via `libs/orchestrator_core`
+- Structured validation diagnostics and run detail inspection
+- Source plugins for S3 copy, MySQL/PostgreSQL logical dump, and filesystem copy
+  (EBS snapshots and RDS snapshots are implemented but temporarily disabled — see
+  [docs/api-usage.md](docs/api-usage.md))
+
+See [docs/README.md](docs/README.md) for full documentation, including
+[getting started](docs/getting-started.md) and [API usage](docs/api-usage.md) guides.
 
 ## High-Level Data Model
 
