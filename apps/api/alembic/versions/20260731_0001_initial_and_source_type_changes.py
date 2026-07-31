@@ -23,6 +23,7 @@ run_status = postgresql.ENUM("queued", "running", "success", "failed", "cancelle
 
 def upgrade() -> None:
     bind = op.get_bind()
+    metadata = sa.MetaData()
 
     op.execute("""
     DO $$
@@ -38,8 +39,9 @@ def upgrade() -> None:
     source_type_old.create(bind, checkfirst=True)
     run_status.create(bind, checkfirst=True)
 
-    op.create_table(
+    destinations = sa.Table(
         "destinations",
+        metadata,
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column("provider", sa.String(length=50), nullable=False),
@@ -53,8 +55,9 @@ def upgrade() -> None:
         sa.UniqueConstraint("name"),
     )
 
-    op.create_table(
+    sources = sa.Table(
         "sources",
+        metadata,
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column("source_type", source_type_old, nullable=False),
@@ -64,8 +67,9 @@ def upgrade() -> None:
         sa.UniqueConstraint("name"),
     )
 
-    op.create_table(
+    bindings = sa.Table(
         "bindings",
+        metadata,
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("source_id", sa.Integer(), nullable=False),
         sa.Column("destination_id", sa.Integer(), nullable=False),
@@ -77,11 +81,10 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["source_id"], ["sources.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_bindings_source_id", "bindings", ["source_id"])
-    op.create_index("ix_bindings_destination_id", "bindings", ["destination_id"])
 
-    op.create_table(
+    backup_runs = sa.Table(
         "backup_runs",
+        metadata,
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("binding_id", sa.Integer(), nullable=False),
         sa.Column("status", run_status, nullable=False),
@@ -95,7 +98,15 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["binding_id"], ["bindings.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_backup_runs_binding_id", "backup_runs", ["binding_id"])
+
+    destinations.create(bind, checkfirst=True)
+    sources.create(bind, checkfirst=True)
+    bindings.create(bind, checkfirst=True)
+    backup_runs.create(bind, checkfirst=True)
+
+    sa.Index("ix_bindings_source_id", bindings.c.source_id).create(bind=bind, checkfirst=True)
+    sa.Index("ix_bindings_destination_id", bindings.c.destination_id).create(bind=bind, checkfirst=True)
+    sa.Index("ix_backup_runs_binding_id", backup_runs.c.binding_id).create(bind=bind, checkfirst=True)
 
     source_type_new.create(bind, checkfirst=True)
     op.execute("ALTER TABLE sources ALTER COLUMN source_type TYPE sourcetype_new USING source_type::text::sourcetype_new")
