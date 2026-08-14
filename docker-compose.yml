@@ -46,7 +46,7 @@ services:
       postgres:
         condition: service_healthy
 
-  api:
+  backup-orchestrator-api:
     build:
       context: .
       dockerfile: ./apps/api/Dockerfile
