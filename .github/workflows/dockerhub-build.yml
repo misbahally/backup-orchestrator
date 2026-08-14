@@ -1,0 +1,80 @@
+name: Build and Push to GHCR
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag (defaults to latest)'
+        required: false
+        default: 'latest'
+
+env:
+  REGISTRY: docker.io
+  IMAGE_BASE: ${{ secrets.DOCKERHUB_USERNAME }}/backup-orchestrator
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          COMMIT_HASH=$(echo "${{ github.sha }}" | cut -c 1-7)
+          IMAGE_TAG=${{ github.event.inputs.image_tag || 'latest' }}
+          echo "commit_hash=$COMMIT_HASH" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-api:${{ steps.meta.outputs.image_tag }}
+            ${{ env.IMAGE_BASE }}-api:${{ steps.meta.outputs.commit_hash }}
+          cache-from: type=registry,ref=${{ env.IMAGE_BASE }}-api:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_BASE }}-api:buildcache,mode=max
+
+      - name: Build and push Worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/worker/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-worker:${{ steps.meta.outputs.image_tag }}
+            ${{ env.IMAGE_BASE }}-worker:${{ steps.meta.outputs.commit_hash }}
+          cache-from: type=registry,ref=${{ env.IMAGE_BASE }}-worker:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_BASE }}-worker:buildcache,mode=max
+
+      - name: Build and push Web image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_BASE }}-web:${{ steps.meta.outputs.image_tag }}
+            ${{ env.IMAGE_BASE }}-web:${{ steps.meta.outputs.commit_hash }}
+          cache-from: type=registry,ref=${{ env.IMAGE_BASE }}-web:buildcache
+          cache-to: type=registry,ref=${{ env.IMAGE_BASE }}-web:buildcache,mode=max
