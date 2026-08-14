@@ -3,7 +3,7 @@ name: Build and Push to Docker Hub
 on:
   push:
     branches:
-      - main
+      - master
   workflow_dispatch:
     inputs:
       image_tag:
