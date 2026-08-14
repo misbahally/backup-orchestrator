@@ -2,14 +2,8 @@ name: Build and Push to Docker Hub
 
 on:
   push:
-    branches:
-      - master
-  workflow_dispatch:
-    inputs:
-      image_tag:
-        description: 'Image tag (defaults to latest)'
-        required: false
-        default: 'latest'
+    tags:
+      - 'v*'
 
 env:
   REGISTRY: docker.io
@@ -41,10 +35,14 @@ jobs:
       - name: Compute image tag
         id: meta
         run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ -z "$TAG" ]; then
+            echo "No tag found for this build ref: ${GITHUB_REF}" >&2
+            exit 1
+          fi
           COMMIT_HASH=$(echo "${{ github.sha }}" | cut -c 1-7)
-          IMAGE_TAG=${{ github.event.inputs.image_tag || 'latest' }}
           echo "commit_hash=$COMMIT_HASH" >> "$GITHUB_OUTPUT"
-          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Build and push API image
         uses: docker/build-push-action@v5
