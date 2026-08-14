@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from pathlib import Path
@@ -45,6 +46,29 @@ class FakeS3Client:
     def head_bucket(self, Bucket):
         self.calls.append(("head_bucket", Bucket))
         return {}
+
+
+def test_destination_credentials_can_be_set_directly_in_api():
+    client = TestClient(api_app, headers=TEST_API_HEADERS)
+    response = client.post(
+        "/destinations",
+        json={
+            "name": "dst-direct-creds",
+            "provider": "s3-compatible",
+            "endpoint": "http://localhost:9000",
+            "bucket": "demo-bucket",
+            "region": "us-east-1",
+            "access_key_id": "AKIA123",
+            "secret_access_key": "SECRET123",
+            "session_token": "TOKEN123",
+        },
+    )
+
+    assert response.status_code == 200
+    stored = json.loads(response.json()["secret_ref"])
+    assert stored["aws_access_key_id"] == "AKIA123"
+    assert stored["aws_secret_access_key"] == "SECRET123"
+    assert stored["aws_session_token"] == "TOKEN123"
 
 
 def test_validation_endpoints_return_structured_results(monkeypatch):

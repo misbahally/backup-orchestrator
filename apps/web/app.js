@@ -298,9 +298,22 @@ function getDestinationPayloadFromForm() {
     endpoint: f.get("endpoint"),
     bucket: f.get("bucket"),
     region: f.get("region"),
-    secret_ref: f.get("secret_ref"),
+    secret_ref: String(f.get("secret_ref") || "").trim(),
     is_active: String(f.get("is_active") || "true").toLowerCase() !== "false",
   };
+
+  const accessKeyId = String(f.get("access_key_id") || "").trim();
+  if (accessKeyId) {
+    payload.access_key_id = accessKeyId;
+  }
+  const secretAccessKey = String(f.get("secret_access_key") || "").trim();
+  if (secretAccessKey) {
+    payload.secret_access_key = secretAccessKey;
+  }
+  const sessionToken = String(f.get("session_token") || "").trim();
+  if (sessionToken) {
+    payload.session_token = sessionToken;
+  }
 
   const encryptionMode = String(f.get("destination_encryption_mode") || "").trim();
   if (encryptionMode) {
@@ -396,6 +409,22 @@ function resetDestinationEditState() {
   setDrawerTitle("destination-drawer-title", "New Destination");
 }
 
+function hydrateDestinationCredentialFields(destination) {
+  const form = document.getElementById("destination-form");
+  let seen = {};
+  try {
+    const parsed = JSON.parse(String(destination.secret_ref || ""));
+    if (parsed && typeof parsed === "object") {
+      seen = parsed;
+    }
+  } catch (err) {
+    seen = {};
+  }
+  form.querySelector("[name='access_key_id']").value = seen.aws_access_key_id || "";
+  form.querySelector("[name='secret_access_key']").value = seen.aws_secret_access_key || "";
+  form.querySelector("[name='session_token']").value = seen.aws_session_token || "";
+}
+
 function startDestinationEdit(destination) {
   editingDestinationId = destination.id;
   const form = document.getElementById("destination-form");
@@ -404,7 +433,8 @@ function startDestinationEdit(destination) {
   form.querySelector("[name='endpoint']").value = destination.endpoint;
   form.querySelector("[name='bucket']").value = destination.bucket;
   form.querySelector("[name='region']").value = destination.region;
-  form.querySelector("[name='secret_ref']").value = destination.secret_ref;
+  form.querySelector("[name='secret_ref']").value = destination.secret_ref || "";
+  hydrateDestinationCredentialFields(destination);
   form.querySelector("[name='is_active']").value = String(Boolean(destination.is_active));
   document.getElementById("destination-submit-btn").textContent = "Save Destination";
   setDrawerTitle("destination-drawer-title", `Edit Destination: ${destination.name}`);

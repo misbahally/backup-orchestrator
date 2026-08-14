@@ -1,6 +1,7 @@
+import json
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .models import RunStatus, SourceType
 
@@ -26,9 +27,35 @@ class DestinationCreate(BaseModel):
     endpoint: str
     bucket: str
     region: str = "us-east-1"
-    secret_ref: str
+    secret_ref: str | None = None
+    access_key_id: str | None = None
+    secret_access_key: str | None = None
+    session_token: str | None = None
     encryption: dict = {}
     is_active: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def coalesce_credentials(cls, data):
+        if not isinstance(data, dict):
+            return data
+
+        secret_ref = str(data.get("secret_ref") or "").strip()
+        access_key_id = str(data.get("access_key_id") or "").strip()
+        secret_access_key = str(data.get("secret_access_key") or "").strip()
+        session_token = str(data.get("session_token") or "").strip()
+
+        if not secret_ref and (access_key_id or secret_access_key or session_token):
+            data["secret_ref"] = json.dumps(
+                {
+                    "aws_access_key_id": access_key_id,
+                    "aws_secret_access_key": secret_access_key,
+                    "aws_session_token": session_token,
+                },
+                separators=(",", ":"),
+            )
+
+        return data
 
 
 class DestinationRead(DestinationCreate):
