@@ -549,7 +549,7 @@
         <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
       </div>
       <div class="offcanvas-body">
-        <p class="text-body-secondary small">Put source encryption under <code>settings.encryption</code> and destination encryption under <code>policy.encryption</code>. Example: <code>{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}</code>.</p>
+        <p class="text-body-secondary small">Configure binding behavior using fields below. Destination encryption values are stored in <code>policy.encryption</code>.</p>
         <form id="binding-form" class="vstack gap-3">
           <div>
             <label class="form-label small mb-1" for="source-select">Source</label>
@@ -563,9 +563,37 @@
             <label class="form-label small mb-1" for="schedule-cron-input">Schedule (cron)</label>
             <input class="form-control" id="schedule-cron-input" name="schedule_cron" value="0 2 * * *" required />
           </div>
-          <div>
-            <label class="form-label small mb-1" for="binding-policy-input">Policy (JSON)</label>
-            <textarea class="form-control" id="binding-policy-input" name="policy" rows="5" placeholder='e.g. {"retention_days":30,"dest_prefix":"daily","encryption":{"mode":"SSE-KMS","kms_key_id":"arn:aws:kms:..."}}'></textarea>
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small mb-1" for="binding-dest-prefix-input">Destination Prefix</label>
+              <input class="form-control" id="binding-dest-prefix-input" name="dest_prefix" placeholder="e.g. daily/backups" />
+              <div class="form-text">Optional path prefix for objects uploaded to the destination bucket.</div>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small mb-1" for="binding-retention-days-input">Retention Days</label>
+              <input class="form-control" id="binding-retention-days-input" name="retention_days" type="number" min="1" step="1" placeholder="e.g. 30" />
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-1" for="binding-encryption-mode">Destination Encryption</label>
+              <select class="form-select" id="binding-encryption-mode" name="binding_encryption_mode">
+                <option value="">None</option>
+                <option value="SSE-S3">SSE-S3</option>
+                <option value="SSE-KMS">SSE-KMS</option>
+                <option value="SSE-C">SSE-C</option>
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small mb-1" for="binding-kms-key-id">KMS Key ID</label>
+              <input class="form-control" id="binding-kms-key-id" name="binding_kms_key_id" placeholder="KMS Key ID" />
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small mb-1" for="binding-kms-key-arn">KMS Key ARN</label>
+              <input class="form-control" id="binding-kms-key-arn" name="binding_kms_key_arn" placeholder="KMS Key ARN" />
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-1" for="binding-customer-key-ref">Customer Key Ref</label>
+              <input class="form-control" id="binding-customer-key-ref" name="binding_customer_key_ref" placeholder="Customer key secret ref" />
+            </div>
           </div>
           <div class="d-flex gap-2 flex-wrap pt-2 border-top">
             <button class="btn btn-primary" id="binding-submit-btn" type="submit">Create Binding</button>

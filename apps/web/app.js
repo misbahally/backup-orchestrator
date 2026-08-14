@@ -59,12 +59,16 @@ async function api(path, options = {}) {
   return resp.json();
 }
 
-function parseJsonOrEmpty(value) {
-  const trimmed = (value || "").trim();
-  if (!trimmed) {
-    return {};
+function parsePositiveIntegerOrNull(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return null;
   }
-  return JSON.parse(trimmed);
+  const parsed = Number(text);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error("Retention Days must be a positive integer");
+  }
+  return parsed;
 }
 
 function setFlash(message, kind = "success") {
@@ -178,11 +182,41 @@ function timestampCell(iso) {
 
 function getBindingPayloadFromForm() {
   const f = new FormData(document.getElementById("binding-form"));
+  const policy = {};
+
+  const destPrefix = String(f.get("dest_prefix") || "").trim();
+  if (destPrefix) {
+    policy.dest_prefix = destPrefix;
+  }
+
+  const retentionDays = parsePositiveIntegerOrNull(f.get("retention_days"));
+  if (retentionDays !== null) {
+    policy.retention_days = retentionDays;
+  }
+
+  const encryptionMode = String(f.get("binding_encryption_mode") || "").trim();
+  if (encryptionMode) {
+    const encryption = { mode: encryptionMode };
+    const kmsKeyId = String(f.get("binding_kms_key_id") || "").trim();
+    if (kmsKeyId) {
+      encryption.kms_key_id = kmsKeyId;
+    }
+    const kmsKeyArn = String(f.get("binding_kms_key_arn") || "").trim();
+    if (kmsKeyArn) {
+      encryption.kms_key_arn = kmsKeyArn;
+    }
+    const customerKeyRef = String(f.get("binding_customer_key_ref") || "").trim();
+    if (customerKeyRef) {
+      encryption.customer_key_ref = customerKeyRef;
+    }
+    policy.encryption = encryption;
+  }
+
   return {
     source_id: Number(f.get("source_id")),
     destination_id: Number(f.get("destination_id")),
     schedule_cron: f.get("schedule_cron"),
-    policy: parseJsonOrEmpty(f.get("policy")),
+    policy,
     is_active: true,
   };
 }
@@ -444,10 +478,17 @@ function startDestinationEdit(destination) {
 function startBindingEdit(binding) {
   editingBindingId = binding.id;
   const form = document.getElementById("binding-form");
+  const policy = binding.policy || {};
+  const encryption = policy.encryption || {};
   form.querySelector("[name='source_id']").value = String(binding.source_id);
   form.querySelector("[name='destination_id']").value = String(binding.destination_id);
   form.querySelector("[name='schedule_cron']").value = binding.schedule_cron || "0 2 * * *";
-  form.querySelector("[name='policy']").value = JSON.stringify(binding.policy || {}, null, 2);
+  form.querySelector("[name='dest_prefix']").value = policy.dest_prefix || "";
+  form.querySelector("[name='retention_days']").value = policy.retention_days || "";
+  form.querySelector("[name='binding_encryption_mode']").value = encryption.mode || "";
+  form.querySelector("[name='binding_kms_key_id']").value = encryption.kms_key_id || "";
+  form.querySelector("[name='binding_kms_key_arn']").value = encryption.kms_key_arn || "";
+  form.querySelector("[name='binding_customer_key_ref']").value = encryption.customer_key_ref || "";
   document.getElementById("binding-submit-btn").textContent = "Save Binding";
   setDrawerTitle("binding-drawer-title", `Edit Binding #${binding.id}`);
   drawerFor("binding-drawer").show();
@@ -973,14 +1014,7 @@ async function boot() {
 
   document.getElementById("test-binding-btn").addEventListener("click", async () => {
     try {
-      const f = new FormData(document.getElementById("binding-form"));
-      const payload = {
-        source_id: Number(f.get("source_id")),
-        destination_id: Number(f.get("destination_id")),
-        schedule_cron: f.get("schedule_cron"),
-        policy: parseJsonOrEmpty(f.get("policy")),
-        is_active: true,
-      };
+      const payload = getBindingPayloadFromForm();
       const result = await api("/validate/binding", { method: "POST", body: JSON.stringify(payload) });
       setFlash(result.message || "Binding validated");
       const container = document.getElementById("validation-results");
