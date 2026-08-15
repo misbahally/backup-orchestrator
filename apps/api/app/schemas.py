@@ -34,6 +34,9 @@ class DestinationCreate(BaseModel):
     encryption: dict = {}
     is_active: bool = True
 
+    def destination_kwargs(self) -> dict:
+        return self.model_dump(exclude={"access_key_id", "secret_access_key", "session_token"})
+
     @model_validator(mode="before")
     @classmethod
     def coalesce_credentials(cls, data):
@@ -54,6 +57,9 @@ class DestinationCreate(BaseModel):
                 },
                 separators=(",", ":"),
             )
+
+        for field_name in ("access_key_id", "secret_access_key", "session_token"):
+            data.pop(field_name, None)
 
         return data
 

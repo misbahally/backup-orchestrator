@@ -71,6 +71,28 @@ def test_destination_credentials_can_be_set_directly_in_api():
     assert stored["aws_session_token"] == "TOKEN123"
 
 
+def test_destination_validation_accepts_legacy_credential_fields(monkeypatch):
+    monkeypatch.setattr(api_main, "_make_s3_client", lambda region, endpoint, creds: FakeS3Client())
+
+    client = TestClient(api_app, headers=TEST_API_HEADERS)
+    response = client.post(
+        "/validate/destination",
+        json={
+            "name": "dst-direct-creds-validation",
+            "provider": "s3-compatible",
+            "endpoint": "http://localhost:9000",
+            "bucket": "demo-bucket",
+            "region": "us-east-1",
+            "access_key_id": "AKIA123",
+            "secret_access_key": "SECRET123",
+            "session_token": "TOKEN123",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+
 def test_validation_endpoints_return_structured_results(monkeypatch):
     monkeypatch.setattr(api_main, "_make_s3_client", lambda region, endpoint, creds: FakeS3Client())
 

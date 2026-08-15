@@ -416,7 +416,7 @@ def metrics() -> Any:
 
 @app.post("/destinations", response_model=DestinationRead)
 def create_destination(payload: DestinationCreate, db: Session = Depends(get_db)) -> Destination:
-    item = Destination(**payload.model_dump())
+    item = Destination(**payload.destination_kwargs())
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -434,7 +434,7 @@ def update_destination(destination_id: int, payload: DestinationCreate, db: Sess
     if item is None:
         raise HTTPException(status_code=404, detail="destination not found")
 
-    for key, value in payload.model_dump().items():
+    for key, value in payload.destination_kwargs().items():
         setattr(item, key, value)
 
     db.commit()
@@ -619,7 +619,7 @@ def validate_source_payload(payload: SourceCreate) -> dict[str, Any]:
 
 @app.post("/validate/destination")
 def validate_destination_payload(payload: DestinationCreate) -> dict[str, Any]:
-    destination = Destination(**payload.model_dump())
+    destination = Destination(**payload.destination_kwargs())
     return _validate_destination_connection(destination)
 
 
