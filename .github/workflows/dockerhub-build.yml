@@ -45,6 +45,7 @@ jobs:
           echo "image_tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Build and push API image
+        id: build_api
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -58,6 +59,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE_BASE }}-api:buildcache,mode=max
 
       - name: Build and push Worker image
+        id: build_worker
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -71,14 +73,26 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE_BASE }}-worker:buildcache,mode=max
 
       - name: Build and push Web image
+        id: build_web
         uses: docker/build-push-action@v5
         with:
           context: .
           file: apps/web/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            BUILD_REF=${{ steps.meta.outputs.commit_hash }}
           tags: |
             ${{ env.IMAGE_BASE }}-web:${{ steps.meta.outputs.image_tag }}
             ${{ env.IMAGE_BASE }}-web:${{ steps.meta.outputs.commit_hash }}
           cache-from: type=registry,ref=${{ env.IMAGE_BASE }}-web:buildcache
           cache-to: type=registry,ref=${{ env.IMAGE_BASE }}-web:buildcache,mode=max
+
+      - name: Publish image digest summary
+        run: |
+          {
+            echo "### Published image digests";
+            echo "- API: ${{ env.IMAGE_BASE }}-api@${{ steps.build_api.outputs.digest }}";
+            echo "- Worker: ${{ env.IMAGE_BASE }}-worker@${{ steps.build_worker.outputs.digest }}";
+            echo "- Web: ${{ env.IMAGE_BASE }}-web@${{ steps.build_web.outputs.digest }}";
+          } >> "$GITHUB_STEP_SUMMARY"

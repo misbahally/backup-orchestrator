@@ -7,6 +7,7 @@ let editingDestinationId = null;
 let editingBindingPolicyBase = {};
 let lastSources = [];
 let lastDestinations = [];
+const FRONTEND_BUILD_REF = "__BUILD_REF__";
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => (
@@ -100,6 +101,15 @@ function setFlash(message, kind = "success") {
   const toast = new bootstrap.Toast(toastEl, { delay: kind === "danger" ? 8000 : 3500 });
   toastEl.addEventListener("hidden.bs.toast", () => toastEl.remove());
   toast.show();
+}
+
+function renderFrontendBuildRef() {
+  const target = document.getElementById("frontend-build-ref");
+  if (!target) {
+    return;
+  }
+  const ref = String(FRONTEND_BUILD_REF || "").trim();
+  target.textContent = `build: ${ref || "unknown"}`;
 }
 
 function renderValidationCard(container, title, result) {
@@ -968,6 +978,7 @@ async function refreshDashboard() {
 
 async function boot() {
   initTheme();
+  renderFrontendBuildRef();
 
   document.getElementById("theme-toggle-btn").addEventListener("click", toggleTheme);
 
