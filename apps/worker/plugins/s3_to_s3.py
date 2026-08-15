@@ -59,7 +59,7 @@ def _resolve_sse_customer_key(encryption: dict[str, Any], region: str, creds: di
     return os.environ.get("MY_KEY", "")
 
 
-def _customer_key_headers(encryption: dict[str, Any], region: str = "us-east-1", creds: dict[str, str] | None = None) -> dict[str, Any]:
+def _customer_key_headers(encryption: dict[str, Any], region: str = "us-east-1", creds: dict[str, str] | None = None) -> dict[str, str]:
     if not encryption:
         return {}
 
@@ -77,8 +77,9 @@ def _customer_key_headers(encryption: dict[str, Any], region: str = "us-east-1",
     if not raw_key or not re.fullmatch(r"[A-Za-z0-9+/]+=*", raw_key):
         raise ValueError("SSE-C key must be base64-encoded AES256 key material")
 
+    normalized_key = raw_key + "=" * ((4 - len(raw_key) % 4) % 4)
     try:
-        key_bytes = base64.b64decode(raw_key + "=" * ((4 - len(raw_key) % 4) % 4), validate=True)
+        key_bytes = base64.b64decode(normalized_key, validate=True)
     except ValueError as exc:
         raise ValueError("SSE-C key must be valid base64-encoded AES256 key material") from exc
 
@@ -90,7 +91,7 @@ def _customer_key_headers(encryption: dict[str, Any], region: str = "us-east-1",
 
     headers: dict[str, str] = {
         "SSECustomerAlgorithm": algorithm,
-        "SSECustomerKey": key_bytes,
+        "SSECustomerKey": normalized_key,
     }
 
     customer_key_md5 = encryption.get("customer_key_md5")

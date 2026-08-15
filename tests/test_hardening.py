@@ -169,7 +169,7 @@ def test_sse_customer_key_accepts_base64_encoded_32_byte_input():
     headers = _customer_key_headers({"mode": "SSE-C", "customer_key": base64_key})
 
     assert headers["SSECustomerAlgorithm"] == "AES256"
-    assert headers["SSECustomerKey"] == key_bytes
+    assert headers["SSECustomerKey"] == base64_key
     assert headers["SSECustomerKeyMD5"] == base64.b64encode(hashlib.md5(key_bytes).digest()).decode("ascii")
 
 
