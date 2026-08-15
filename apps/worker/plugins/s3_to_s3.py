@@ -3,10 +3,10 @@ import hashlib
 import json
 import os
 import re
+from datetime import datetime
 from typing import Any
 
 import boto3
-from botocore.exceptions import ClientError
 
 from secret_resolver import resolve_secret_mapping, resolve_secret_text
 
@@ -152,23 +152,48 @@ def _dest_key_for(source_key: str, source_prefix: str, dest_prefix: str) -> str:
     return "/".join(part for part in (dest_prefix, rel) if part)
 
 
-def _exists_with_same_size(
+def _list_objects(
     s3_client: Any,
     bucket: str,
-    key: str,
-    size: int,
-    encryption: dict[str, Any] | None = None,
+    prefix: str,
+) -> dict[str, dict[str, Any]]:
+    paginator = s3_client.get_paginator("list_objects_v2")
+    objects: dict[str, dict[str, Any]] = {}
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            objects[obj["Key"]] = {
+                "size": int(obj.get("Size", 0)),
+                "last_modified": obj.get("LastModified"),
+            }
+    return objects
+
+
+def _should_copy(
+    source_size: int,
+    source_last_modified: datetime | None,
+    destination_meta: dict[str, Any] | None,
+    *,
+    size_only: bool,
+    exact_timestamps: bool,
 ) -> bool:
-    try:
-        head_kwargs: dict[str, Any] = {"Bucket": bucket, "Key": key}
-        head_kwargs.update(_customer_key_headers(encryption or {}, s3_client.meta.region_name or "us-east-1", {}))
-        obj = s3_client.head_object(**head_kwargs)
-        return int(obj.get("ContentLength", -1)) == int(size)
-    except ClientError as exc:
-        code = exc.response.get("Error", {}).get("Code", "")
-        if code in ("404", "NoSuchKey", "NotFound"):
-            return False
-        raise
+    if not destination_meta:
+        return True
+
+    destination_size = int(destination_meta.get("size", -1))
+    if destination_size != int(source_size):
+        return True
+
+    if size_only:
+        return False
+
+    destination_last_modified = destination_meta.get("last_modified")
+    if not isinstance(source_last_modified, datetime) or not isinstance(destination_last_modified, datetime):
+        return False
+
+    if exact_timestamps:
+        return source_last_modified != destination_last_modified
+
+    return source_last_modified > destination_last_modified
 
 
 def run_s3_to_s3(source: Any, destination: Any, binding: Any) -> dict[str, int]:
@@ -204,44 +229,69 @@ def run_s3_to_s3(source: Any, destination: Any, binding: Any) -> dict[str, int]:
     dst = _make_s3_client(dst_region, dst_endpoint, dst_creds)
 
     src_prefix_for_list = f"{source_prefix}/" if source_prefix else ""
+    dst_prefix_for_list = f"{dest_prefix}/" if dest_prefix else ""
+
+    size_only = bool(policy.get("size_only", False))
+    exact_timestamps = bool(policy.get("exact_timestamps", False))
+    delete_extraneous = bool(policy.get("delete", False))
 
     scanned = 0
     copied = 0
     skipped = 0
+    deleted = 0
     transferred_bytes = 0
 
-    paginator = src.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=source_bucket, Prefix=src_prefix_for_list):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            size = int(obj.get("Size", 0))
-            scanned += 1
+    source_objects = _list_objects(src, source_bucket, src_prefix_for_list)
+    destination_objects = _list_objects(dst, destination.bucket, dst_prefix_for_list)
 
-            target_key = _dest_key_for(key, source_prefix, dest_prefix)
+    source_to_destination_keys: dict[str, str] = {}
+    for source_key, source_meta in source_objects.items():
+        source_to_destination_keys[source_key] = _dest_key_for(source_key, source_prefix, dest_prefix)
 
-            if _exists_with_same_size(dst, destination.bucket, target_key, size, destination_encryption):
-                skipped += 1
-                continue
+        size = int(source_meta.get("size", 0))
+        source_last_modified = source_meta.get("last_modified")
+        scanned += 1
 
-            get_kwargs: dict[str, Any] = {"Bucket": source_bucket, "Key": key}
-            get_kwargs.update(_customer_key_headers(source_encryption, src_region, src_creds))
-            response = src.get_object(**get_kwargs)
-            body = response["Body"]
-            try:
-                extra_args = _upload_extra_args(destination_encryption)
-                if extra_args:
-                    dst.upload_fileobj(body, destination.bucket, target_key, ExtraArgs=extra_args)
-                else:
-                    dst.upload_fileobj(body, destination.bucket, target_key)
-            finally:
-                body.close()
+        target_key = source_to_destination_keys[source_key]
+        destination_meta = destination_objects.get(target_key)
 
-            copied += 1
-            transferred_bytes += size
+        if not _should_copy(
+            size,
+            source_last_modified,
+            destination_meta,
+            size_only=size_only,
+            exact_timestamps=exact_timestamps,
+        ):
+            skipped += 1
+            continue
+
+        get_kwargs: dict[str, Any] = {"Bucket": source_bucket, "Key": source_key}
+        get_kwargs.update(_customer_key_headers(source_encryption, src_region, src_creds))
+        response = src.get_object(**get_kwargs)
+        body = response["Body"]
+        try:
+            extra_args = _upload_extra_args(destination_encryption)
+            if extra_args:
+                dst.upload_fileobj(body, destination.bucket, target_key, ExtraArgs=extra_args)
+            else:
+                dst.upload_fileobj(body, destination.bucket, target_key)
+        finally:
+            body.close()
+
+        copied += 1
+        transferred_bytes += size
+
+    if delete_extraneous:
+        expected_destination_keys = set(source_to_destination_keys.values())
+        for target_key in destination_objects:
+            if target_key not in expected_destination_keys:
+                dst.delete_object(Bucket=destination.bucket, Key=target_key)
+                deleted += 1
 
     return {
         "scanned_objects": scanned,
         "copied_objects": copied,
         "skipped_objects": skipped,
+        "deleted_objects": deleted,
         "transferred_bytes": transferred_bytes,
     }
