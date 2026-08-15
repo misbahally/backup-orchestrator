@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 import os
 from typing import Any
@@ -42,14 +44,21 @@ def _customer_key_headers(encryption: dict[str, Any]) -> dict[str, str]:
     if not customer_key:
         customer_key = os.environ.get("MY_KEY", "")
 
+    key_bytes = customer_key.encode("utf-8") if isinstance(customer_key, str) else bytes(customer_key)
+    encoded_key = base64.b64encode(key_bytes).decode("ascii")
+    md5_bytes = hashlib.md5(key_bytes).digest()
+    md5_key = base64.b64encode(md5_bytes).decode("ascii")
+
     headers: dict[str, str] = {
         "SSECustomerAlgorithm": str(encryption.get("algorithm", "AES256")),
-        "SSECustomerKey": customer_key,
+        "SSECustomerKey": encoded_key,
     }
 
     customer_key_md5 = encryption.get("customer_key_md5")
     if customer_key_md5:
         headers["SSECustomerKeyMD5"] = str(customer_key_md5)
+    else:
+        headers["SSECustomerKeyMD5"] = md5_key
 
     return headers
 

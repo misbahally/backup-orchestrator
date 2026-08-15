@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import json
 import os
 import sys
@@ -150,6 +152,17 @@ def test_file_source_allowlist_check():
     )
     assert response.status_code == 200
     assert response.json()["ok"] is False
+
+
+def test_sse_customer_key_is_base64_encoded():
+    from plugins.s3_to_s3 import _customer_key_headers
+
+    raw_key = "super-secret-key"
+    headers = _customer_key_headers({"mode": "SSE-C", "customer_key": raw_key})
+
+    assert headers["SSECustomerAlgorithm"] == "AES256"
+    assert headers["SSECustomerKey"] == base64.b64encode(raw_key.encode("utf-8")).decode("ascii")
+    assert headers["SSECustomerKeyMD5"] == base64.b64encode(hashlib.md5(raw_key.encode("utf-8")).digest()).decode("ascii")
 
 
 def test_scheduler_should_enqueue_when_cron_due():
