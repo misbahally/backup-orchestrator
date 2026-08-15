@@ -4,6 +4,7 @@ let appInitialized = false;
 let editingBindingId = null;
 let editingSourceId = null;
 let editingDestinationId = null;
+let editingBindingPolicyBase = {};
 let lastSources = [];
 let lastDestinations = [];
 
@@ -11,6 +12,17 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => (
     { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]
   ));
+}
+
+function cloneJsonObject(value) {
+  if (!value || typeof value !== "object") {
+    return {};
+  }
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (err) {
+    return {};
+  }
 }
 
 function getAuthHeaders() {
@@ -182,16 +194,20 @@ function timestampCell(iso) {
 
 function getBindingPayloadFromForm() {
   const f = new FormData(document.getElementById("binding-form"));
-  const policy = {};
+  const policy = cloneJsonObject(editingBindingPolicyBase);
 
   const destPrefix = String(f.get("dest_prefix") || "").trim();
   if (destPrefix) {
     policy.dest_prefix = destPrefix;
+  } else {
+    delete policy.dest_prefix;
   }
 
   const retentionDays = parsePositiveIntegerOrNull(f.get("retention_days"));
   if (retentionDays !== null) {
     policy.retention_days = retentionDays;
+  } else {
+    delete policy.retention_days;
   }
 
   const encryptionMode = String(f.get("binding_encryption_mode") || "").trim();
@@ -210,6 +226,10 @@ function getBindingPayloadFromForm() {
       encryption.customer_key_ref = customerKeyRef;
     }
     policy.encryption = encryption;
+    delete policy.destination_encryption;
+  } else {
+    delete policy.encryption;
+    delete policy.destination_encryption;
   }
 
   return {
@@ -372,6 +392,7 @@ function getDestinationPayloadFromForm() {
 
 function resetBindingEditState() {
   editingBindingId = null;
+  editingBindingPolicyBase = {};
   const form = document.getElementById("binding-form");
   form.reset();
   document.getElementById("binding-submit-btn").textContent = "Create Binding";
@@ -445,6 +466,9 @@ function resetDestinationEditState() {
 
 function hydrateDestinationCredentialFields(destination) {
   const form = document.getElementById("destination-form");
+  const directAccessKeyId = String(destination.access_key_id || "");
+  const directSecretAccessKey = String(destination.secret_access_key || "");
+  const directSessionToken = String(destination.session_token || "");
   let seen = {};
   try {
     const parsed = JSON.parse(String(destination.secret_ref || ""));
@@ -454,9 +478,9 @@ function hydrateDestinationCredentialFields(destination) {
   } catch (err) {
     seen = {};
   }
-  form.querySelector("[name='access_key_id']").value = seen.aws_access_key_id || "";
-  form.querySelector("[name='secret_access_key']").value = seen.aws_secret_access_key || "";
-  form.querySelector("[name='session_token']").value = seen.aws_session_token || "";
+  form.querySelector("[name='access_key_id']").value = directAccessKeyId || seen.aws_access_key_id || "";
+  form.querySelector("[name='secret_access_key']").value = directSecretAccessKey || seen.aws_secret_access_key || "";
+  form.querySelector("[name='session_token']").value = directSessionToken || seen.aws_session_token || "";
 }
 
 function startDestinationEdit(destination) {
@@ -478,8 +502,9 @@ function startDestinationEdit(destination) {
 function startBindingEdit(binding) {
   editingBindingId = binding.id;
   const form = document.getElementById("binding-form");
-  const policy = binding.policy || {};
-  const encryption = policy.encryption || {};
+  const policy = cloneJsonObject(binding.policy || {});
+  editingBindingPolicyBase = policy;
+  const encryption = policy.encryption || policy.destination_encryption || {};
   form.querySelector("[name='source_id']").value = String(binding.source_id);
   form.querySelector("[name='destination_id']").value = String(binding.destination_id);
   form.querySelector("[name='schedule_cron']").value = binding.schedule_cron || "0 2 * * *";
@@ -1000,8 +1025,7 @@ async function boot() {
 
   document.getElementById("test-destination-btn").addEventListener("click", async () => {
     try {
-      const f = new FormData(document.getElementById("destination-form"));
-      const payload = Object.fromEntries(f.entries());
+      const payload = getDestinationPayloadFromForm();
       const result = await api("/validate/destination", { method: "POST", body: JSON.stringify(payload) });
       setFlash(result.message || "Destination validated");
       const container = document.getElementById("validation-results");
