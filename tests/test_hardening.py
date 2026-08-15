@@ -154,15 +154,34 @@ def test_file_source_allowlist_check():
     assert response.json()["ok"] is False
 
 
-def test_sse_customer_key_is_base64_encoded():
+def test_sse_customer_key_headers_use_raw_32_byte_key():
     from plugins.s3_to_s3 import _customer_key_headers
 
-    raw_key = "super-secret-key"
+    raw_key = "a" * 32
     headers = _customer_key_headers({"mode": "SSE-C", "customer_key": raw_key})
 
     assert headers["SSECustomerAlgorithm"] == "AES256"
-    assert headers["SSECustomerKey"] == base64.b64encode(raw_key.encode("utf-8")).decode("ascii")
+    assert headers["SSECustomerKey"] == raw_key.encode("utf-8")
     assert headers["SSECustomerKeyMD5"] == base64.b64encode(hashlib.md5(raw_key.encode("utf-8")).digest()).decode("ascii")
+
+
+def test_sse_customer_key_accepts_base64_encoded_32_byte_input():
+    from plugins.s3_to_s3 import _customer_key_headers
+
+    key_bytes = b"x" * 32
+    base64_key = base64.b64encode(key_bytes).decode("ascii")
+    headers = _customer_key_headers({"mode": "SSE-C", "customer_key": base64_key})
+
+    assert headers["SSECustomerAlgorithm"] == "AES256"
+    assert headers["SSECustomerKey"] == key_bytes
+    assert headers["SSECustomerKeyMD5"] == base64.b64encode(hashlib.md5(key_bytes).digest()).decode("ascii")
+
+
+def test_sse_customer_key_rejects_invalid_aes256_length():
+    from plugins.s3_to_s3 import _customer_key_headers
+
+    with pytest.raises(ValueError, match="exactly 32 bytes"):
+        _customer_key_headers({"mode": "SSE-C", "customer_key": "too-short"})
 
 
 def test_sse_aws_secrets_arn_resolves_secret(monkeypatch):

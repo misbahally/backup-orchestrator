@@ -2,6 +2,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 from typing import Any
 
 import boto3
@@ -58,7 +59,7 @@ def _resolve_sse_customer_key(encryption: dict[str, Any], region: str, creds: di
     return os.environ.get("MY_KEY", "")
 
 
-def _customer_key_headers(encryption: dict[str, Any], region: str = "us-east-1", creds: dict[str, str] | None = None) -> dict[str, str]:
+def _customer_key_headers(encryption: dict[str, Any], region: str = "us-east-1", creds: dict[str, str] | None = None) -> dict[str, Any]:
     if not encryption:
         return {}
 
@@ -66,15 +67,31 @@ def _customer_key_headers(encryption: dict[str, Any], region: str = "us-east-1",
     if mode not in {"SSE-C", "SSE_C", "CUSTOMER", "AES256-C"}:
         return {}
 
+    algorithm = str(encryption.get("algorithm", "AES256") or "AES256").upper()
     customer_key = _resolve_sse_customer_key(encryption, region, creds)
-    key_bytes = customer_key.encode("utf-8") if isinstance(customer_key, str) else bytes(customer_key)
-    encoded_key = base64.b64encode(key_bytes).decode("ascii")
+
+    if isinstance(customer_key, str):
+        raw_key = customer_key.strip()
+        # Accept both raw 32-byte keys and base64-encoded 32-byte keys.
+        if len(raw_key) in {43, 44} and re.fullmatch(r"[A-Za-z0-9+/]+=*", raw_key):
+            try:
+                key_bytes = base64.b64decode(raw_key + "=" * ((4 - len(raw_key) % 4) % 4), validate=True)
+            except ValueError:
+                key_bytes = raw_key.encode("utf-8")
+        else:
+            key_bytes = raw_key.encode("utf-8")
+    else:
+        key_bytes = bytes(customer_key)
+
+    if algorithm == "AES256" and len(key_bytes) != 32:
+        raise ValueError("SSE-C key must be exactly 32 bytes for AES256")
+
     md5_bytes = hashlib.md5(key_bytes).digest()
     md5_key = base64.b64encode(md5_bytes).decode("ascii")
 
     headers: dict[str, str] = {
-        "SSECustomerAlgorithm": str(encryption.get("algorithm", "AES256")),
-        "SSECustomerKey": encoded_key,
+        "SSECustomerAlgorithm": algorithm,
+        "SSECustomerKey": key_bytes,
     }
 
     customer_key_md5 = encryption.get("customer_key_md5")
