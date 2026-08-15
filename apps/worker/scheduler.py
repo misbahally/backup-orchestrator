@@ -53,7 +53,7 @@ def _should_enqueue(binding: Binding, now: datetime, interval_seconds: int) -> b
 def enqueue_due_bindings() -> int:
     redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
     max_retries = int(os.environ.get("MAX_RETRIES", "3"))
-    job_timeout = os.environ.get("RQ_JOB_TIMEOUT", "2h")
+    job_timeout = os.environ.get("RQ_JOB_TIMEOUT", "6h")
 
     redis_conn = Redis.from_url(redis_url)
     work_queue = Queue("backup-runs", connection=redis_conn)
@@ -95,7 +95,7 @@ def enqueue_due_bindings() -> int:
 
 
 def reap_stale_running_runs() -> int:
-    timeout_raw = os.environ.get("RQ_JOB_TIMEOUT", "2h")
+    timeout_raw = os.environ.get("RQ_JOB_TIMEOUT", "6h")
     if timeout_raw.endswith("h"):
         max_seconds = int(timeout_raw[:-1]) * 3600
     elif timeout_raw.endswith("m"):

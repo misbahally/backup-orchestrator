@@ -106,7 +106,7 @@ the run stays in `running` forever.
    caused by connectivity; do NOT retry on `NotImplementedError`, validation
    errors, or auth failures (4xx from S3).
 4. **Job timeout:** pass `job_timeout` from env (`RQ_JOB_TIMEOUT`, default e.g.
-   `2h`) when enqueueing so hung jobs are killed by RQ instead of blocking the
+   `6h`) when enqueueing so hung jobs are killed by RQ instead of blocking the
    queue indefinitely.
 5. **Stale-run reaper:** add a small loop (can live in the scheduler process) that
    marks runs as `failed` (message: "worker lost / timed out") when they have been

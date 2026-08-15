@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     api_keys: str = ""
     expose_docs: bool = True
     max_retries: int = 3
-    rq_job_timeout: str = "2h"
+    rq_job_timeout: str = "6h"
     file_source_allowed_roots: str = "/data:/mnt/backups"
     log_level: str = "INFO"
 
