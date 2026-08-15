@@ -395,7 +395,11 @@
               </div>
               <div class="col-12">
                 <label class="form-label small mb-1">AWS Secrets ARN</label>
-                <input class="form-control form-control-sm" name="s3_customer_key_ref" placeholder="arn:aws:secretsmanager:us-east-1:123456789012:secret:my-key" />
+                <input class="form-control form-control-sm" name="s3_customer_key_ref" placeholder="arn:aws:secretsmanager:eu-west-1:123456789012:secret:my-key" />
+              </div>
+              <div class="col-12">
+                <label class="form-label small mb-1">AWS Secrets Region</label>
+                <input class="form-control form-control-sm" name="s3_aws_secrets_region" placeholder="eu-west-1" />
               </div>
             </div>
           </div>
@@ -531,7 +535,11 @@
               </div>
               <div class="col-12">
                 <label class="form-label small mb-1">AWS Secrets ARN</label>
-                <input class="form-control form-control-sm" name="destination_customer_key_ref" placeholder="arn:aws:secretsmanager:us-east-1:123456789012:secret:my-key" />
+                <input class="form-control form-control-sm" name="destination_customer_key_ref" placeholder="arn:aws:secretsmanager:eu-west-1:123456789012:secret:my-key" />
+              </div>
+              <div class="col-12">
+                <label class="form-label small mb-1">AWS Secrets Region</label>
+                <input class="form-control form-control-sm" name="destination_aws_secrets_region" placeholder="eu-west-1" />
               </div>
             </div>
           </div>
@@ -593,7 +601,11 @@
             </div>
             <div class="col-12">
               <label class="form-label small mb-1" for="binding-customer-key-ref">AWS Secrets ARN</label>
-              <input class="form-control" id="binding-customer-key-ref" name="binding_customer_key_ref" placeholder="arn:aws:secretsmanager:us-east-1:123456789012:secret:my-key" />
+              <input class="form-control" id="binding-customer-key-ref" name="binding_customer_key_ref" placeholder="arn:aws:secretsmanager:eu-west-1:123456789012:secret:my-key" />
+            </div>
+            <div class="col-12">
+              <label class="form-label small mb-1" for="binding-aws-secrets-region">AWS Secrets Region</label>
+              <input class="form-control" id="binding-aws-secrets-region" name="binding_aws_secrets_region" placeholder="eu-west-1" />
             </div>
           </div>
           <div class="d-flex gap-2 flex-wrap pt-2 border-top">

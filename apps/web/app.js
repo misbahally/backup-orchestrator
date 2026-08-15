@@ -235,6 +235,10 @@ function getBindingPayloadFromForm() {
     if (awsSecretsArn) {
       encryption.aws_secrets_arn = awsSecretsArn;
     }
+    const awsSecretsRegion = String(f.get("binding_aws_secrets_region") || "").trim();
+    if (awsSecretsRegion) {
+      encryption.aws_secrets_region = awsSecretsRegion;
+    }
     policy.encryption = encryption;
     delete policy.destination_encryption;
   } else {
@@ -294,6 +298,10 @@ function getS3SettingsFromForm() {
     const awsSecretsArn = String(f.get("s3_customer_key_ref") || "").trim();
     if (awsSecretsArn) {
       encryption.aws_secrets_arn = awsSecretsArn;
+    }
+    const awsSecretsRegion = String(f.get("s3_aws_secrets_region") || "").trim();
+    if (awsSecretsRegion) {
+      encryption.aws_secrets_region = awsSecretsRegion;
     }
     settings.encryption = encryption;
   }
@@ -394,6 +402,10 @@ function getDestinationPayloadFromForm() {
     if (awsSecretsArn) {
       encryption.aws_secrets_arn = awsSecretsArn;
     }
+    const awsSecretsRegion = String(f.get("destination_aws_secrets_region") || "").trim();
+    if (awsSecretsRegion) {
+      encryption.aws_secrets_region = awsSecretsRegion;
+    }
     payload.encryption = encryption;
   }
 
@@ -451,6 +463,7 @@ function startSourceEdit(source) {
   form.querySelector("[name='s3_kms_key_id']").value = encryption.kms_key_id || "";
   form.querySelector("[name='s3_kms_key_arn']").value = encryption.kms_key_arn || "";
   form.querySelector("[name='s3_customer_key_ref']").value = encryption.aws_secrets_arn || encryption.customer_key_ref || "";
+  form.querySelector("[name='s3_aws_secrets_region']").value = encryption.aws_secrets_region || "";
   form.querySelector("[name='file_root_path']").value = settings.root_path || "";
   form.querySelector("[name='file_include_globs']").value = (settings.include_globs || []).join(", ");
   form.querySelector("[name='file_exclude_globs']").value = (settings.exclude_globs || []).join(", ");
@@ -524,6 +537,7 @@ function startBindingEdit(binding) {
   form.querySelector("[name='binding_kms_key_id']").value = encryption.kms_key_id || "";
   form.querySelector("[name='binding_kms_key_arn']").value = encryption.kms_key_arn || "";
   form.querySelector("[name='binding_customer_key_ref']").value = encryption.aws_secrets_arn || encryption.customer_key_ref || "";
+  form.querySelector("[name='binding_aws_secrets_region']").value = encryption.aws_secrets_region || "";
   document.getElementById("binding-submit-btn").textContent = "Save Binding";
   setDrawerTitle("binding-drawer-title", `Edit Binding #${binding.id}`);
   drawerFor("binding-drawer").show();

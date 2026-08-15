@@ -189,6 +189,29 @@ def test_sse_aws_secrets_arn_resolves_secret(monkeypatch):
     assert resolved == "from-aws-secrets"
 
 
+def test_sse_aws_secrets_region_override_is_used(monkeypatch):
+    from plugins.s3_to_s3 import _resolve_sse_customer_key
+
+    class FakeSecretsManagerClient:
+        def get_secret_value(self, SecretId):
+            return {"SecretString": "from-secret-region"}
+
+    def fake_boto_client(service_name, **kwargs):
+        assert service_name == "secretsmanager"
+        assert kwargs["region_name"] == "eu-west-1"
+        return FakeSecretsManagerClient()
+
+    monkeypatch.setattr("plugins.s3_to_s3.boto3.client", fake_boto_client)
+
+    resolved = _resolve_sse_customer_key(
+        {"mode": "SSE-C", "aws_secrets_arn": "arn:aws:secretsmanager:eu-west-1:736517612587:secret:wasabi-sync-zgXsKK", "aws_secrets_region": "eu-west-1"},
+        "us-east-1",
+        {},
+    )
+
+    assert resolved == "from-secret-region"
+
+
 def test_scheduler_should_enqueue_when_cron_due():
     binding = SimpleNamespace(id=1, schedule_cron="* * * * *", last_scheduled_at=None)
     now = scheduler._utcnow()

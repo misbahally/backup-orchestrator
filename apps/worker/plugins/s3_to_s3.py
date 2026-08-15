@@ -39,9 +39,10 @@ def _resolve_sse_customer_key(encryption: dict[str, Any], region: str, creds: di
     if aws_secrets_arn:
         aws_secrets_arn = str(aws_secrets_arn)
         if aws_secrets_arn.startswith("arn:aws:secretsmanager:"):
+            secret_region = str(encryption.get("aws_secrets_region") or region or "us-east-1").strip() or "us-east-1"
             secret_client = boto3.client(
                 "secretsmanager",
-                region_name=region or "us-east-1",
+                region_name=secret_region,
             )
             response = secret_client.get_secret_value(SecretId=aws_secrets_arn)
             secret_value = response.get("SecretString", "")
