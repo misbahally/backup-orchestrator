@@ -42,9 +42,6 @@ def _resolve_sse_customer_key(encryption: dict[str, Any], region: str, creds: di
             secret_client = boto3.client(
                 "secretsmanager",
                 region_name=region or "us-east-1",
-                aws_access_key_id=creds.get("aws_access_key_id") if creds else None,
-                aws_secret_access_key=creds.get("aws_secret_access_key") if creds else None,
-                aws_session_token=creds.get("aws_session_token") if creds else None,
             )
             response = secret_client.get_secret_value(SecretId=aws_secrets_arn)
             secret_value = response.get("SecretString", "")

@@ -176,6 +176,9 @@ def test_sse_aws_secrets_arn_resolves_secret(monkeypatch):
     def fake_boto_client(service_name, **kwargs):
         assert service_name == "secretsmanager"
         assert kwargs["region_name"] == "us-east-1"
+        assert "aws_access_key_id" not in kwargs
+        assert "aws_secret_access_key" not in kwargs
+        assert "aws_session_token" not in kwargs
         return FakeSecretsManagerClient()
 
     monkeypatch.setattr("plugins.s3_to_s3.boto3.client", fake_boto_client)
