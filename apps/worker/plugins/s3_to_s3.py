@@ -31,7 +31,36 @@ def _normalise_encryption_config(raw: Any) -> dict[str, Any]:
     raise TypeError(f"Unsupported encryption config type: {type(raw)!r}")
 
 
-def _customer_key_headers(encryption: dict[str, Any]) -> dict[str, str]:
+def _resolve_sse_customer_key(encryption: dict[str, Any], region: str, creds: dict[str, str] | None = None) -> str:
+    if not encryption:
+        return ""
+
+    aws_secrets_arn = encryption.get("aws_secrets_arn") or encryption.get("customer_key_ref") or encryption.get("customer_key_secret_ref")
+    if aws_secrets_arn:
+        aws_secrets_arn = str(aws_secrets_arn)
+        if aws_secrets_arn.startswith("arn:aws:secretsmanager:"):
+            secret_client = boto3.client(
+                "secretsmanager",
+                region_name=region or "us-east-1",
+                aws_access_key_id=creds.get("aws_access_key_id") if creds else None,
+                aws_secret_access_key=creds.get("aws_secret_access_key") if creds else None,
+                aws_session_token=creds.get("aws_session_token") if creds else None,
+            )
+            response = secret_client.get_secret_value(SecretId=aws_secrets_arn)
+            secret_value = response.get("SecretString", "")
+            if isinstance(secret_value, str):
+                return secret_value.strip()
+            return ""
+        return _load_text_secret(aws_secrets_arn)
+
+    customer_key = encryption.get("customer_key")
+    if customer_key:
+        return str(customer_key)
+
+    return os.environ.get("MY_KEY", "")
+
+
+def _customer_key_headers(encryption: dict[str, Any], region: str = "us-east-1", creds: dict[str, str] | None = None) -> dict[str, str]:
     if not encryption:
         return {}
 
@@ -39,11 +68,7 @@ def _customer_key_headers(encryption: dict[str, Any]) -> dict[str, str]:
     if mode not in {"SSE-C", "SSE_C", "CUSTOMER", "AES256-C"}:
         return {}
 
-    customer_key_ref = encryption.get("customer_key_ref") or encryption.get("customer_key_secret_ref")
-    customer_key = encryption.get("customer_key") or _load_text_secret(str(customer_key_ref or ""))
-    if not customer_key:
-        customer_key = os.environ.get("MY_KEY", "")
-
+    customer_key = _resolve_sse_customer_key(encryption, region, creds)
     key_bytes = customer_key.encode("utf-8") if isinstance(customer_key, str) else bytes(customer_key)
     encoded_key = base64.b64encode(key_bytes).decode("ascii")
     md5_bytes = hashlib.md5(key_bytes).digest()
@@ -121,7 +146,7 @@ def _exists_with_same_size(
 ) -> bool:
     try:
         head_kwargs: dict[str, Any] = {"Bucket": bucket, "Key": key}
-        head_kwargs.update(_customer_key_headers(encryption or {}))
+        head_kwargs.update(_customer_key_headers(encryption or {}, s3_client.meta.region_name or "us-east-1", {}))
         obj = s3_client.head_object(**head_kwargs)
         return int(obj.get("ContentLength", -1)) == int(size)
     except ClientError as exc:
@@ -184,7 +209,7 @@ def run_s3_to_s3(source: Any, destination: Any, binding: Any) -> dict[str, int]:
                 continue
 
             get_kwargs: dict[str, Any] = {"Bucket": source_bucket, "Key": key}
-            get_kwargs.update(_customer_key_headers(source_encryption))
+            get_kwargs.update(_customer_key_headers(source_encryption, src_region, src_creds))
             response = src.get_object(**get_kwargs)
             body = response["Body"]
             try:

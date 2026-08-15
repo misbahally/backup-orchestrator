@@ -394,8 +394,8 @@
                 <input class="form-control form-control-sm" name="s3_kms_key_arn" placeholder="KMS Key ARN" />
               </div>
               <div class="col-12">
-                <label class="form-label small mb-1">Customer Key Ref</label>
-                <input class="form-control form-control-sm" name="s3_customer_key_ref" placeholder="Customer Key Ref" />
+                <label class="form-label small mb-1">AWS Secrets ARN</label>
+                <input class="form-control form-control-sm" name="s3_customer_key_ref" placeholder="arn:aws:secretsmanager:us-east-1:123456789012:secret:my-key" />
               </div>
             </div>
           </div>
@@ -530,8 +530,8 @@
                 <input class="form-control form-control-sm" name="destination_kms_key_arn" placeholder="KMS Key ARN" />
               </div>
               <div class="col-12">
-                <label class="form-label small mb-1">Customer Key Ref</label>
-                <input class="form-control form-control-sm" name="destination_customer_key_ref" placeholder="Customer Key Ref" />
+                <label class="form-label small mb-1">AWS Secrets ARN</label>
+                <input class="form-control form-control-sm" name="destination_customer_key_ref" placeholder="arn:aws:secretsmanager:us-east-1:123456789012:secret:my-key" />
               </div>
             </div>
           </div>
@@ -592,8 +592,8 @@
               <input class="form-control" id="binding-kms-key-arn" name="binding_kms_key_arn" placeholder="KMS Key ARN" />
             </div>
             <div class="col-12">
-              <label class="form-label small mb-1" for="binding-customer-key-ref">Customer Key Ref</label>
-              <input class="form-control" id="binding-customer-key-ref" name="binding_customer_key_ref" placeholder="Customer key secret ref" />
+              <label class="form-label small mb-1" for="binding-customer-key-ref">AWS Secrets ARN</label>
+              <input class="form-control" id="binding-customer-key-ref" name="binding_customer_key_ref" placeholder="arn:aws:secretsmanager:us-east-1:123456789012:secret:my-key" />
             </div>
           </div>
           <div class="d-flex gap-2 flex-wrap pt-2 border-top">

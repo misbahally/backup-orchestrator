@@ -142,8 +142,13 @@ def _validate_sse_config(name: str, config: dict[str, Any]) -> None:
         return
 
     if mode in {"SSE-C", "SSE_C", "CUSTOMER", "AES256-C"}:
-        if not (config.get("customer_key") or config.get("customer_key_ref") or config.get("customer_key_secret_ref")):
-            raise HTTPException(status_code=400, detail=f"{name} SSE-C requires customer_key or customer_key_ref")
+        if not (
+            config.get("customer_key")
+            or config.get("customer_key_ref")
+            or config.get("customer_key_secret_ref")
+            or config.get("aws_secrets_arn")
+        ):
+            raise HTTPException(status_code=400, detail=f"{name} SSE-C requires customer_key, customer_key_ref, or aws_secrets_arn")
         return
 
     raise HTTPException(status_code=400, detail=f"{name} has unsupported encryption mode: {config.get('mode')}")

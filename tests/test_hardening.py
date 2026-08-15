@@ -165,6 +165,27 @@ def test_sse_customer_key_is_base64_encoded():
     assert headers["SSECustomerKeyMD5"] == base64.b64encode(hashlib.md5(raw_key.encode("utf-8")).digest()).decode("ascii")
 
 
+def test_sse_aws_secrets_arn_resolves_secret(monkeypatch):
+    from plugins.s3_to_s3 import _resolve_sse_customer_key
+
+    class FakeSecretsManagerClient:
+        def get_secret_value(self, SecretId):
+            assert SecretId == "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-sse-key"
+            return {"SecretString": "from-aws-secrets"}
+
+    def fake_boto_client(service_name, **kwargs):
+        assert service_name == "secretsmanager"
+        assert kwargs["region_name"] == "us-east-1"
+        return FakeSecretsManagerClient()
+
+    monkeypatch.setattr("plugins.s3_to_s3.boto3.client", fake_boto_client)
+    monkeypatch.setattr("plugins.s3_to_s3._load_secret", lambda secret_ref: {"aws_access_key_id": "AKIA", "aws_secret_access_key": "SECRET"})
+
+    resolved = _resolve_sse_customer_key({"mode": "SSE-C", "aws_secrets_arn": "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-sse-key"}, "us-east-1", {"aws_access_key_id": "AKIA", "aws_secret_access_key": "SECRET"})
+
+    assert resolved == "from-aws-secrets"
+
+
 def test_scheduler_should_enqueue_when_cron_due():
     binding = SimpleNamespace(id=1, schedule_cron="* * * * *", last_scheduled_at=None)
     now = scheduler._utcnow()
