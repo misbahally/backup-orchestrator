@@ -130,6 +130,45 @@ function renderValidationCard(container, title, result) {
   container.appendChild(card);
 }
 
+function renderStatusHistory(container, history) {
+  if (!Array.isArray(history) || history.length === 0) {
+    return;
+  }
+
+  const card = document.createElement("div");
+  card.className = "card border-0 shadow-sm mt-3";
+  card.innerHTML = `
+    <div class="card-body">
+      <h4 class="h6 mb-3">Status History</h4>
+      <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0">
+          <thead>
+            <tr>
+              <th>Changed At</th>
+              <th>Status Change</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${history.map(entry => `
+              <tr>
+                <td class="small"><span title="${escapeHtml(entry.changed_at)}">${escapeHtml(timeAgo(entry.changed_at))}</span></td>
+                <td class="small">
+                  ${entry.old_status ? `<span class="status-badge status-${entry.old_status.toLowerCase()}">${escapeHtml(entry.old_status)}</span>` : '<span class="text-muted">—</span>'}
+                  <i class="bi bi-arrow-right mx-1"></i>
+                  <span class="status-badge status-${entry.new_status.toLowerCase()}">${escapeHtml(entry.new_status)}</span>
+                </td>
+                <td class="small text-muted">${escapeHtml(entry.reason || "")}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  container.appendChild(card);
+}
+
 function openSettingsModal() {
   const form = document.getElementById("settings-form");
   form.querySelector("[name='api_base_url']").value = apiBase;
@@ -1000,10 +1039,14 @@ async function refreshRuns() {
       event.preventDefault();
       const runId = link.dataset.runId;
       try {
-        const detail = await api(`/runs/${runId}`);
+        const [detail, history] = await Promise.all([
+          api(`/runs/${runId}`),
+          api(`/runs/${runId}/history`),
+        ]);
         const panel = document.getElementById("run-detail-panel");
         panel.innerHTML = "";
         renderValidationCard(panel, "Run Detail", { ok: true, message: detail.message || "Run inspected", details: detail });
+        renderStatusHistory(panel, history);
       } catch (err) {
         setFlash(`Could not load run detail: ${err.message}`, "danger");
       }

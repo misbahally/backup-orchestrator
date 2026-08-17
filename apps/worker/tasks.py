@@ -13,7 +13,7 @@ from metrics import (
     BACKUP_OPERATIONS_TOTAL,
     BACKUP_UPLOADED_BYTES_TOTAL,
 )
-from models import BackupRun, Binding, Destination, RunStatus, Source, SourceType
+from models import BackupRun, BackupRunStatusHistory, Binding, Destination, RunStatus, Source, SourceType
 from plugins import run_database_dump_to_s3, run_ebs_snapshot, run_file_to_s3, run_rds_snapshot, run_s3_to_s3
 
 
@@ -34,6 +34,17 @@ def _is_retryable(exc: Exception) -> bool:
         if code.startswith("4") and code not in {"429", "408"}:
             return False
     return True
+
+
+def _record_status_change(db, run: BackupRun, new_status: RunStatus, reason: str = "") -> None:
+    """Record a status change in the backup_run_status_history table."""
+    history_entry = BackupRunStatusHistory(
+        backup_run_id=run.id,
+        old_status=run.status,
+        new_status=new_status,
+        reason=reason,
+    )
+    db.add(history_entry)
 
 
 def run_backup_job(run_id: int) -> None:
@@ -75,6 +86,7 @@ def run_backup_job(run_id: int) -> None:
             db.commit()
             return
 
+        _record_status_change(db, run, RunStatus.running, f"Starting execution (attempt {int(run.attempts or 0) + 1})")
         run.status = RunStatus.running
         run.attempts = int(run.attempts or 0) + 1
         current_job = get_current_job()
@@ -118,6 +130,7 @@ def run_backup_job(run_id: int) -> None:
             db.commit()
             return
 
+        _record_status_change(db, run, RunStatus.success, "Backup completed successfully")
         run.status = RunStatus.success
         run.bytes_transferred = transferred
         run.artifact_ref = artifact_ref
@@ -138,10 +151,12 @@ def run_backup_job(run_id: int) -> None:
             if job is not None and getattr(job, "id", None):
                 run.queue_job_id = str(job.id)
             if retryable and retries_left > 0:
+                _record_status_change(db, run, RunStatus.queued, f"Retrying after error: {exc} ({retries_left} retries left)")
                 run.status = RunStatus.queued
                 run.message = f"Retrying ({retries_left} retries left): {exc}"
                 db.commit()
             else:
+                _record_status_change(db, run, RunStatus.failed, f"Backup failed: {exc}")
                 run.status = RunStatus.failed
                 run.finished_at = _utcnow()
                 run.message = f"Failed: {exc}"

@@ -33,7 +33,7 @@ from .auth import (
 )
 from .config import settings
 from .database import get_db
-from .models import BackupRun, Binding, Destination, RunStatus, Source, SourceType, User
+from .models import BackupRun, BackupRunStatusHistory, Binding, Destination, RunStatus, Source, SourceType, User
 from .schemas import (
     BindingCreate,
     BindingRead,
@@ -44,6 +44,7 @@ from .schemas import (
     LoginResponse,
     RunCancelRequest,
     RunRead,
+    RunStatusHistoryRead,
     SourceCreate,
     SourceDatabaseScanRequest,
     SourceRead,
@@ -885,6 +886,17 @@ def read_run(run_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
         "max_attempts": run.max_attempts,
         "artifact_ref": run.artifact_ref,
     }
+
+
+@app.get("/runs/{run_id}/history", response_model=list[RunStatusHistoryRead])
+def read_run_status_history(run_id: int, db: Session = Depends(get_db)) -> list[BackupRunStatusHistory]:
+    run = db.get(BackupRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+
+    return db.query(BackupRunStatusHistory).filter(
+        BackupRunStatusHistory.backup_run_id == run_id
+    ).order_by(BackupRunStatusHistory.changed_at.asc()).all()
 
 
 @app.get("/topology")

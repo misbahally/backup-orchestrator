@@ -123,3 +123,15 @@ class RunRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class RunStatusHistoryRead(BaseModel):
+    id: int
+    backup_run_id: int
+    old_status: RunStatus | None
+    new_status: RunStatus
+    changed_at: datetime
+    reason: str = ""
+
+    class Config:
+        from_attributes = True

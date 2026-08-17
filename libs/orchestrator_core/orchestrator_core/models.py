@@ -78,6 +78,17 @@ class BackupRun(Base):
     message: Mapped[str] = mapped_column(Text, default="")
 
 
+class BackupRunStatusHistory(Base):
+    __tablename__ = "backup_run_status_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    backup_run_id: Mapped[int] = mapped_column(ForeignKey("backup_runs.id"), nullable=False, index=True)
+    old_status: Mapped[RunStatus | None] = mapped_column(Enum(RunStatus), nullable=True)
+    new_status: Mapped[RunStatus] = mapped_column(Enum(RunStatus), nullable=False)
+    changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, index=True)
+    reason: Mapped[str] = mapped_column(Text, default="")
+
+
 class User(Base):
     __tablename__ = "users"
 

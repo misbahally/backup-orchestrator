@@ -1,6 +1,7 @@
 from orchestrator_core.models import (
     Base,
     BackupRun,
+    BackupRunStatusHistory,
     Binding,
     Destination,
     RunStatus,
@@ -12,6 +13,7 @@ from orchestrator_core.models import (
 
 __all__ = [
     "BackupRun",
+    "BackupRunStatusHistory",
     "Base",
     "Binding",
     "Destination",
