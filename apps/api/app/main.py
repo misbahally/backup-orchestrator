@@ -781,7 +781,18 @@ def _cancel_run(run: BackupRun, q: Queue, db: Session) -> tuple[bool, str]:
     job_id = _get_run_job_id(run)
 
     if not job_id:
-        return False, "no queue job id found for this run"
+        if run.status.value == "queued":
+            run.status = RunStatus.failed
+            run.finished_at = datetime.now(timezone.utc)
+            run.message = "Failed: stale queued job (missing RQ job id)"
+            db.commit()
+            return False, "stale queued job"
+
+        run.status = RunStatus.cancelled
+        run.finished_at = datetime.now(timezone.utc)
+        run.message = "Cancelled: stale running job (missing RQ job id)"
+        db.commit()
+        return True, "cancelled"
 
     try:
         job = Job.fetch(job_id, connection=q.connection)

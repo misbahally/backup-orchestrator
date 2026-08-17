@@ -339,6 +339,25 @@ def test_cancel_run_marks_running_job_cancelled_immediately(monkeypatch):
     assert run.status == RunStatus.cancelled
 
 
+def test_cancel_run_marks_stale_job_missing_queue_id(monkeypatch):
+    run = BackupRun(binding_id=1, status=RunStatus.queued, message="Retrying (2 retries left): error", queue_job_id="")
+    q = SimpleNamespace(connection=object())
+    db = SimpleNamespace(commit=lambda: None)
+
+    ok, reason = api_main._cancel_run(run, q, db)
+
+    assert ok is False
+    assert reason == "stale queued job"
+    assert run.status == RunStatus.failed
+
+    run = BackupRun(binding_id=1, status=RunStatus.running, message="Running s3 backup (attempt 1)", queue_job_id="")
+    ok, reason = api_main._cancel_run(run, q, db)
+
+    assert ok is True
+    assert reason == "cancelled"
+    assert run.status == RunStatus.cancelled
+
+
 def test_run_backup_job_updates_status(monkeypatch):
     monkeypatch.setattr(tasks, "run_s3_to_s3", lambda source, destination, binding: {"copied_objects": 1, "skipped_objects": 0, "transferred_bytes": 7})
 
