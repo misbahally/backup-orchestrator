@@ -71,6 +71,9 @@ def run_backup_job(run_id: int) -> None:
 
         run.status = RunStatus.running
         run.attempts = int(run.attempts or 0) + 1
+        current_job = get_current_job()
+        if current_job is not None and getattr(current_job, "id", None):
+            run.queue_job_id = str(current_job.id)
         run.message = f"Running {source.source_type.value} backup (attempt {run.attempts})"
         db.commit()
 
@@ -120,6 +123,8 @@ def run_backup_job(run_id: int) -> None:
         retryable = _is_retryable(exc)
 
         if run is not None:
+            if job is not None and getattr(job, "id", None):
+                run.queue_job_id = str(job.id)
             if retryable and retries_left > 0:
                 run.status = RunStatus.queued
                 run.message = f"Retrying ({retries_left} retries left): {exc}"

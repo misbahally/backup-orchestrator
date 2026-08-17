@@ -234,6 +234,32 @@ def test_scheduler_should_enqueue_when_cron_due():
     assert scheduler._should_enqueue(binding, now, 60) is True
 
 
+def test_cancel_run_uses_persisted_queue_job_id_for_retry_messages(monkeypatch):
+    class FakeJob:
+        def get_status(self, refresh=True):
+            return "queued"
+
+        def cancel(self):
+            self.cancelled = True
+
+    monkeypatch.setattr(api_main.Job, "fetch", lambda job_id, connection=None: FakeJob())
+
+    run = BackupRun(
+        binding_id=1,
+        status=RunStatus.queued,
+        message="Retrying (2 retries left): Task exceeded maximum timeout value (21600 seconds)",
+        queue_job_id="job-123",
+    )
+    q = SimpleNamespace(connection=object())
+    db = SimpleNamespace(commit=lambda: None)
+
+    ok, reason = api_main._cancel_run(run, q, db)
+
+    assert ok is True
+    assert reason == "cancelled"
+    assert run.status == RunStatus.cancelled
+
+
 def test_run_backup_job_updates_status(monkeypatch):
     monkeypatch.setattr(tasks, "run_s3_to_s3", lambda source, destination, binding: {"copied_objects": 1, "skipped_objects": 0, "transferred_bytes": 7})
 

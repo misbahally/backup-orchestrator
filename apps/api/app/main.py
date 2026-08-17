@@ -353,6 +353,10 @@ def _extract_job_id(message: str) -> str:
     return message.removeprefix("Queued (job ").removesuffix(")")
 
 
+def _get_run_job_id(run: BackupRun) -> str:
+    return (run.queue_job_id or _extract_job_id(run.message) or "").strip()
+
+
 def _enqueue_run(run: BackupRun, q: Queue) -> BackupRun:
     retry = Retry(max=max(settings.max_retries, 0), interval=[60, 300, 900]) if settings.max_retries > 0 else None
     job = q.enqueue(
@@ -361,6 +365,7 @@ def _enqueue_run(run: BackupRun, q: Queue) -> BackupRun:
         retry=retry,
         job_timeout=settings.rq_job_timeout,
     )
+    run.queue_job_id = job.id
     run.message = f"Queued (job {job.id})"
     run.max_attempts = max(settings.max_retries, 0) + 1
     return run
@@ -685,7 +690,7 @@ def _cancel_run(run: BackupRun, q: Queue, db: Session) -> tuple[bool, str]:
     if run.status.value not in {"queued", "running"}:
         return False, f"run is {run.status.value}"
 
-    job_id = _extract_job_id(run.message)
+    job_id = _get_run_job_id(run)
 
     if not job_id:
         return False, "no queue job id found for this run"

@@ -74,6 +74,7 @@ class BackupRun(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, default=0)
     artifact_ref: Mapped[str] = mapped_column(String(255), default="")
+    queue_job_id: Mapped[str] = mapped_column(String(64), default="", index=True)
     message: Mapped[str] = mapped_column(Text, default="")
 
 

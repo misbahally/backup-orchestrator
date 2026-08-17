@@ -27,6 +27,10 @@ def _extract_job_id(message: str) -> str:
     return message.removeprefix("Queued (job ").removesuffix(")")
 
 
+def _get_run_job_id(run: BackupRun) -> str:
+    return (run.queue_job_id or _extract_job_id(run.message) or "").strip()
+
+
 def _has_active_run(db, binding_id: int) -> bool:
     existing = (
         db.query(BackupRun)
@@ -83,6 +87,7 @@ def enqueue_due_bindings() -> int:
             db.flush()
             retry = Retry(max=max_retries, interval=[60, 300, 900]) if max_retries > 0 else None
             job = work_queue.enqueue("tasks.run_backup_job", run.id, retry=retry, job_timeout=job_timeout)
+            run.queue_job_id = job.id
             run.message = f"Queued (job {job.id})"
             binding.last_scheduled_at = now
             db.commit()
@@ -113,7 +118,7 @@ def reap_stale_running_runs() -> int:
     try:
         runs = db.query(BackupRun).filter(BackupRun.status == RunStatus.running).filter(BackupRun.started_at < cutoff).all()
         for run in runs:
-            job_id = _extract_job_id(run.message)
+            job_id = _get_run_job_id(run)
             if not job_id:
                 run.status = RunStatus.failed
                 run.finished_at = _utcnow()
