@@ -79,7 +79,14 @@ def _build_dump_command(source: Any, database: str) -> tuple[list[str], dict[str
         return command, env
 
     if engine == "mysql":
-        command = ["mysqldump", "--defaults-file=/dev/null"]
+        # Use least-privilege friendly defaults: avoid PROCESS (tablespaces)
+        # and explicit table locks.
+        command = [
+            "mysqldump",
+            "--defaults-file=/dev/null",
+            "--no-tablespaces",
+            "--single-transaction"
+        ]
         if host:
             command.extend(["--host", host])
         if port:
