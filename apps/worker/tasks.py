@@ -69,6 +69,12 @@ def run_backup_job(run_id: int) -> None:
         if not binding.is_active:
             raise ValueError(f"Binding {binding.id} is not active")
 
+        if run.status == RunStatus.cancelled:
+            run.finished_at = _utcnow()
+            run.message = "Cancelled before execution"
+            db.commit()
+            return
+
         run.status = RunStatus.running
         run.attempts = int(run.attempts or 0) + 1
         current_job = get_current_job()
@@ -105,6 +111,12 @@ def run_backup_job(run_id: int) -> None:
             artifact_ref = str(summary.get("artifact_ref", ""))
         else:
             raise NotImplementedError(f"Source type '{source.source_type.value}' is not implemented yet")
+
+        if run.status == RunStatus.cancelled:
+            run.finished_at = _utcnow()
+            run.message = "Cancelled before execution"
+            db.commit()
+            return
 
         run.status = RunStatus.success
         run.bytes_transferred = transferred

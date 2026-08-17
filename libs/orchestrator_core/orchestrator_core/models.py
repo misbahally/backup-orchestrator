@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -70,7 +70,7 @@ class BackupRun(Base):
     status: Mapped[RunStatus] = mapped_column(Enum(RunStatus), default=RunStatus.queued)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    bytes_transferred: Mapped[int] = mapped_column(Integer, default=0)
+    bytes_transferred: Mapped[int] = mapped_column(BigInteger, default=0)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, default=0)
     artifact_ref: Mapped[str] = mapped_column(String(255), default="")
