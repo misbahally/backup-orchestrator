@@ -23,10 +23,24 @@ _ADMIN_PASSWORD_HASH = (
 
 
 def upgrade() -> None:
-    # Create enum types with IF NOT EXISTS to be idempotent on partial re-runs (PostgreSQL only)
+    # Create enum types with exception handling for idempotency on partial re-runs (PostgreSQL only)
     if op.get_bind().dialect.name == "postgresql":
-        op.execute("CREATE TYPE IF NOT EXISTS sourcetype AS ENUM ('s3', 'mysql', 'postgresql', 'file', 'ebs', 'rds')")
-        op.execute("CREATE TYPE IF NOT EXISTS runstatus AS ENUM ('queued', 'running', 'success', 'failed', 'cancelled')")
+        op.execute("""
+            DO $$
+            BEGIN
+                CREATE TYPE sourcetype AS ENUM ('s3', 'mysql', 'postgresql', 'file', 'ebs', 'rds');
+            EXCEPTION WHEN duplicate_object THEN
+                null;
+            END $$;
+        """)
+        op.execute("""
+            DO $$
+            BEGIN
+                CREATE TYPE runstatus AS ENUM ('queued', 'running', 'success', 'failed', 'cancelled');
+            EXCEPTION WHEN duplicate_object THEN
+                null;
+            END $$;
+        """)
 
     op.create_table(
         "sources",
