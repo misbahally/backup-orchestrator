@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "20260731_0001"
@@ -21,9 +22,20 @@ _ADMIN_PASSWORD_HASH = (
     "$524949adad3ba01ffceb27aef2b86ee95528c968a9914b745072fff7a2896fb4"
 )
 
+_SOURCETYPE_VALUES = ("s3", "mysql", "postgresql", "file", "ebs", "rds")
+_RUNSTATUS_VALUES = ("queued", "running", "success", "failed", "cancelled")
+
+
+def _enum(values: tuple, name: str) -> sa.types.TypeEngine:
+    # Generic sa.Enum ignores create_type; postgresql.ENUM(create_type=False) is
+    # required so create_table does not emit CREATE TYPE again on PostgreSQL.
+    if op.get_bind().dialect.name == "postgresql":
+        return postgresql.ENUM(*values, name=name, create_type=False)
+    return sa.Enum(*values, name=name)
+
 
 def upgrade() -> None:
-    # Create enum types with exception handling for idempotency on partial re-runs (PostgreSQL only)
+    # Create enum types idempotently (PostgreSQL only)
     if op.get_bind().dialect.name == "postgresql":
         op.execute("""
             DO $$
@@ -46,7 +58,7 @@ def upgrade() -> None:
         "sources",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("name", sa.String(120), nullable=False),
-        sa.Column("source_type", sa.Enum("s3", "mysql", "postgresql", "file", "ebs", "rds", name="sourcetype", create_type=False), nullable=False),
+        sa.Column("source_type", _enum(_SOURCETYPE_VALUES, "sourcetype"), nullable=False),
         sa.Column("settings", sa.JSON(), nullable=True),
         sa.Column("is_active", sa.Boolean(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
@@ -88,7 +100,7 @@ def upgrade() -> None:
         "backup_runs",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("binding_id", sa.Integer(), nullable=False),
-        sa.Column("status", sa.Enum("queued", "running", "success", "failed", "cancelled", name="runstatus", create_type=False), nullable=True),
+        sa.Column("status", _enum(_RUNSTATUS_VALUES, "runstatus"), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("bytes_transferred", sa.BigInteger(), nullable=True),
@@ -107,8 +119,8 @@ def upgrade() -> None:
         "backup_run_status_history",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("backup_run_id", sa.Integer(), nullable=False),
-        sa.Column("old_status", sa.Enum("queued", "running", "success", "failed", "cancelled", name="runstatus", create_type=False), nullable=True),
-        sa.Column("new_status", sa.Enum("queued", "running", "success", "failed", "cancelled", name="runstatus", create_type=False), nullable=False),
+        sa.Column("old_status", _enum(_RUNSTATUS_VALUES, "runstatus"), nullable=True),
+        sa.Column("new_status", _enum(_RUNSTATUS_VALUES, "runstatus"), nullable=False),
         sa.Column("changed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("reason", sa.Text(), nullable=True),
         sa.ForeignKeyConstraint(["backup_run_id"], ["backup_runs.id"]),
