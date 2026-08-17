@@ -8,6 +8,41 @@ let editingBindingPolicyBase = {};
 let lastSources = [];
 let lastDestinations = [];
 const FRONTEND_BUILD_REF = "__BUILD_REF__";
+const BINDING_PRESETS = {
+  safe: {
+    parallel_workers: 2,
+    max_transfer_concurrency: 4,
+    multipart_threshold_mb: 32,
+    multipart_chunk_mb: 8,
+    compression_enabled: false,
+    compression_level: "",
+    compression_min_size_bytes: "",
+    compression_include_extensions: "",
+    compression_exclude_extensions: "",
+  },
+  balanced: {
+    parallel_workers: 4,
+    max_transfer_concurrency: 8,
+    multipart_threshold_mb: 16,
+    multipart_chunk_mb: 8,
+    compression_enabled: true,
+    compression_level: 6,
+    compression_min_size_bytes: 1024,
+    compression_include_extensions: ".txt, .log, .json, .csv, .sql, .xml, .yaml, .yml, .md, .html, .js, .css",
+    compression_exclude_extensions: ".zip, .gz, .bz2, .xz, .7z, .rar, .jpg, .jpeg, .png, .webp, .gif, .mp4, .mov, .pdf, .parquet",
+  },
+  throughput: {
+    parallel_workers: 12,
+    max_transfer_concurrency: 16,
+    multipart_threshold_mb: 16,
+    multipart_chunk_mb: 16,
+    compression_enabled: false,
+    compression_level: "",
+    compression_min_size_bytes: "",
+    compression_include_extensions: "",
+    compression_exclude_extensions: "",
+  },
+};
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => (
@@ -82,6 +117,34 @@ function parsePositiveIntegerOrNull(value) {
     throw new Error("Retention Days must be a positive integer");
   }
   return parsed;
+}
+
+function parseIntegerInRangeOrNull(value, { label, min, max }) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return null;
+  }
+  const parsed = Number(text);
+  if (!Number.isInteger(parsed)) {
+    throw new Error(`${label} must be an integer`);
+  }
+  if (parsed < min || parsed > max) {
+    throw new Error(`${label} must be between ${min} and ${max}`);
+  }
+  return parsed;
+}
+
+function parseCsvList(value) {
+  return String(value ?? "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .map((item) => {
+      if (!item) {
+        return "";
+      }
+      return item.startsWith(".") ? item : `.${item}`;
+    })
+    .filter(Boolean);
 }
 
 function setFlash(message, kind = "success") {
@@ -184,6 +247,26 @@ function setDrawerTitle(titleId, text) {
   document.getElementById(titleId).textContent = text;
 }
 
+function applyBindingPreset(presetName) {
+  const form = document.getElementById("binding-form");
+  const preset = BINDING_PRESETS[presetName];
+  if (!preset) {
+    return false;
+  }
+
+  form.querySelector("[name='parallel_workers']").value = String(preset.parallel_workers);
+  form.querySelector("[name='max_transfer_concurrency']").value = String(preset.max_transfer_concurrency);
+  form.querySelector("[name='multipart_threshold_mb']").value = String(preset.multipart_threshold_mb);
+  form.querySelector("[name='multipart_chunk_mb']").value = String(preset.multipart_chunk_mb);
+  form.querySelector("[name='compression_enabled']").value = String(Boolean(preset.compression_enabled));
+  form.querySelector("[name='compression_level']").value = String(preset.compression_level);
+  form.querySelector("[name='compression_min_size_bytes']").value = String(preset.compression_min_size_bytes);
+  form.querySelector("[name='compression_include_extensions']").value = String(preset.compression_include_extensions);
+  form.querySelector("[name='compression_exclude_extensions']").value = String(preset.compression_exclude_extensions);
+
+  return true;
+}
+
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-bs-theme", theme);
   const icon = document.getElementById("theme-toggle-icon");
@@ -245,6 +328,15 @@ function getBindingPayloadFromForm() {
   const f = new FormData(document.getElementById("binding-form"));
   const policy = cloneJsonObject(editingBindingPolicyBase);
 
+  const setOptionalInt = (fieldName, policyKey, options) => {
+    const parsed = parseIntegerInRangeOrNull(f.get(fieldName), options);
+    if (parsed === null) {
+      delete policy[policyKey];
+      return;
+    }
+    policy[policyKey] = parsed;
+  };
+
   const destPrefix = String(f.get("dest_prefix") || "").trim();
   if (destPrefix) {
     policy.dest_prefix = destPrefix;
@@ -257,6 +349,51 @@ function getBindingPayloadFromForm() {
     policy.retention_days = retentionDays;
   } else {
     delete policy.retention_days;
+  }
+
+  setOptionalInt("parallel_workers", "parallel_workers", { label: "Parallel Workers", min: 1, max: 64 });
+  setOptionalInt("max_transfer_concurrency", "max_transfer_concurrency", { label: "Transfer Concurrency", min: 1, max: 64 });
+  setOptionalInt("multipart_threshold_mb", "multipart_threshold_mb", { label: "Multipart Threshold (MB)", min: 5, max: 512 });
+  setOptionalInt("multipart_chunk_mb", "multipart_chunk_mb", { label: "Multipart Chunk (MB)", min: 5, max: 128 });
+
+  const compressionEnabled = String(f.get("compression_enabled") || "false").toLowerCase() === "true";
+  if (compressionEnabled) {
+    const compression = {
+      enabled: true,
+      algorithm: "gzip",
+    };
+
+    const compressionLevel = parseIntegerInRangeOrNull(f.get("compression_level"), {
+      label: "Compression Level",
+      min: 1,
+      max: 9,
+    });
+    if (compressionLevel !== null) {
+      compression.level = compressionLevel;
+    }
+
+    const minSize = parseIntegerInRangeOrNull(f.get("compression_min_size_bytes"), {
+      label: "Min Object Size",
+      min: 0,
+      max: 1_000_000_000,
+    });
+    if (minSize !== null) {
+      compression.min_size_bytes = minSize;
+    }
+
+    const includeExtensions = parseCsvList(f.get("compression_include_extensions"));
+    if (includeExtensions.length) {
+      compression.include_extensions = includeExtensions;
+    }
+
+    const excludeExtensions = parseCsvList(f.get("compression_exclude_extensions"));
+    if (excludeExtensions.length) {
+      compression.exclude_extensions = excludeExtensions;
+    }
+
+    policy.compression = compression;
+  } else {
+    delete policy.compression;
   }
 
   const encryptionMode = String(f.get("binding_encryption_mode") || "").trim();
@@ -519,6 +656,8 @@ function resetBindingEditState() {
   editingBindingPolicyBase = {};
   const form = document.getElementById("binding-form");
   form.reset();
+  form.querySelector("[name='binding_preset']").value = "custom";
+  form.querySelector("[name='compression_enabled']").value = "false";
   document.getElementById("binding-submit-btn").textContent = "Create Binding";
   setDrawerTitle("binding-drawer-title", "New Binding");
 }
@@ -643,11 +782,26 @@ function startBindingEdit(binding) {
   const policy = cloneJsonObject(binding.policy || {});
   editingBindingPolicyBase = policy;
   const encryption = policy.encryption || policy.destination_encryption || {};
+  const compression = policy.compression || {};
   form.querySelector("[name='source_id']").value = String(binding.source_id);
   form.querySelector("[name='destination_id']").value = String(binding.destination_id);
   form.querySelector("[name='schedule_cron']").value = binding.schedule_cron || "0 2 * * *";
+  form.querySelector("[name='binding_preset']").value = "custom";
   form.querySelector("[name='dest_prefix']").value = policy.dest_prefix || "";
   form.querySelector("[name='retention_days']").value = policy.retention_days || "";
+  form.querySelector("[name='parallel_workers']").value = policy.parallel_workers || "";
+  form.querySelector("[name='max_transfer_concurrency']").value = policy.max_transfer_concurrency || "";
+  form.querySelector("[name='multipart_threshold_mb']").value = policy.multipart_threshold_mb || "";
+  form.querySelector("[name='multipart_chunk_mb']").value = policy.multipart_chunk_mb || "";
+  form.querySelector("[name='compression_enabled']").value = String(Boolean(compression.enabled));
+  form.querySelector("[name='compression_level']").value = compression.level || "";
+  form.querySelector("[name='compression_min_size_bytes']").value = compression.min_size_bytes || "";
+  form.querySelector("[name='compression_include_extensions']").value = Array.isArray(compression.include_extensions)
+    ? compression.include_extensions.join(", ")
+    : "";
+  form.querySelector("[name='compression_exclude_extensions']").value = Array.isArray(compression.exclude_extensions)
+    ? compression.exclude_extensions.join(", ")
+    : "";
   form.querySelector("[name='binding_encryption_mode']").value = encryption.mode || "";
   form.querySelector("[name='binding_kms_key_id']").value = encryption.kms_key_id || "";
   form.querySelector("[name='binding_kms_key_arn']").value = encryption.kms_key_arn || "";
@@ -1262,6 +1416,17 @@ async function boot() {
   });
 
   const bindingForm = document.getElementById("binding-form");
+  document.getElementById("apply-binding-preset-btn").addEventListener("click", () => {
+    const preset = String(bindingForm.querySelector("[name='binding_preset']").value || "custom");
+    if (preset === "custom") {
+      setFlash("Select a preset to apply", "danger");
+      return;
+    }
+    const applied = applyBindingPreset(preset);
+    if (applied) {
+      setFlash(`Applied ${preset.replace("throughput", "high throughput")} preset`);
+    }
+  });
   bindingForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     try {

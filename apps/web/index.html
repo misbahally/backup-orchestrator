@@ -584,6 +584,23 @@
             <label class="form-label small mb-1" for="schedule-cron-input">Schedule (cron)</label>
             <input class="form-control" id="schedule-cron-input" name="schedule_cron" value="0 2 * * *" required />
           </div>
+          <div class="border rounded p-3 bg-body-tertiary">
+            <div class="row g-2 align-items-end">
+              <div class="col-md-8">
+                <label class="form-label small mb-1" for="binding-preset-select">S3 Sync Preset</label>
+                <select class="form-select form-select-sm" id="binding-preset-select" name="binding_preset">
+                  <option value="custom">Custom</option>
+                  <option value="safe">Safe</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="throughput">High Throughput</option>
+                </select>
+                <div class="form-text">Presets auto-fill performance and compression fields. You can still adjust values manually.</div>
+              </div>
+              <div class="col-md-4 d-grid">
+                <button class="btn btn-outline-secondary btn-sm" type="button" id="apply-binding-preset-btn">Apply Preset</button>
+              </div>
+            </div>
+          </div>
           <div class="row g-3">
             <div class="col-md-6">
               <label class="form-label small mb-1" for="binding-dest-prefix-input">Destination Prefix</label>
@@ -593,6 +610,62 @@
             <div class="col-md-6">
               <label class="form-label small mb-1" for="binding-retention-days-input">Retention Days</label>
               <input class="form-control" id="binding-retention-days-input" name="retention_days" type="number" min="1" step="1" placeholder="e.g. 30" />
+            </div>
+            <div class="col-12">
+              <div class="border rounded p-3 bg-body-tertiary">
+                <div class="fw-semibold small mb-2">S3 sync performance</div>
+                <div class="row g-2">
+                  <div class="col-md-6">
+                    <label class="form-label small mb-1" for="binding-parallel-workers-input">Parallel Workers</label>
+                    <input class="form-control form-control-sm" id="binding-parallel-workers-input" name="parallel_workers" type="number" min="1" max="64" step="1" placeholder="4" />
+                    <div class="form-text">Number of objects copied in parallel.</div>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label small mb-1" for="binding-max-transfer-concurrency-input">Transfer Concurrency</label>
+                    <input class="form-control form-control-sm" id="binding-max-transfer-concurrency-input" name="max_transfer_concurrency" type="number" min="1" max="64" step="1" placeholder="8" />
+                    <div class="form-text">Multipart transfer threads per upload.</div>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label small mb-1" for="binding-multipart-threshold-input">Multipart Threshold (MB)</label>
+                    <input class="form-control form-control-sm" id="binding-multipart-threshold-input" name="multipart_threshold_mb" type="number" min="5" max="512" step="1" placeholder="16" />
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label small mb-1" for="binding-multipart-chunk-input">Multipart Chunk (MB)</label>
+                    <input class="form-control form-control-sm" id="binding-multipart-chunk-input" name="multipart_chunk_mb" type="number" min="5" max="128" step="1" placeholder="8" />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="col-12">
+              <div class="border rounded p-3 bg-body-tertiary">
+                <div class="fw-semibold small mb-2">S3 sync compression</div>
+                <div class="row g-2">
+                  <div class="col-md-6">
+                    <label class="form-label small mb-1" for="binding-compression-enabled">Compression</label>
+                    <select class="form-select form-select-sm" id="binding-compression-enabled" name="compression_enabled">
+                      <option value="false">Disabled</option>
+                      <option value="true">Enabled (gzip)</option>
+                    </select>
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label small mb-1" for="binding-compression-level">Compression Level (1-9)</label>
+                    <input class="form-control form-control-sm" id="binding-compression-level" name="compression_level" type="number" min="1" max="9" step="1" placeholder="6" />
+                  </div>
+                  <div class="col-md-6">
+                    <label class="form-label small mb-1" for="binding-compression-min-size">Min Object Size (bytes)</label>
+                    <input class="form-control form-control-sm" id="binding-compression-min-size" name="compression_min_size_bytes" type="number" min="0" step="1" placeholder="1024" />
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label small mb-1" for="binding-compression-include-ext">Include Extensions</label>
+                    <input class="form-control form-control-sm" id="binding-compression-include-ext" name="compression_include_extensions" placeholder=".txt, .json, .csv, .sql" />
+                    <div class="form-text">Comma-separated list. Compression runs only for listed extensions.</div>
+                  </div>
+                  <div class="col-12">
+                    <label class="form-label small mb-1" for="binding-compression-exclude-ext">Exclude Extensions</label>
+                    <input class="form-control form-control-sm" id="binding-compression-exclude-ext" name="compression_exclude_extensions" placeholder=".zip, .gz, .jpg" />
+                  </div>
+                </div>
+              </div>
             </div>
             <div class="col-12">
               <label class="form-label small mb-1" for="binding-encryption-mode">Destination Encryption</label>

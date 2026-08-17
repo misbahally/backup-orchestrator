@@ -422,6 +422,64 @@ def _validate_schedule(schedule_cron: str) -> None:
         raise HTTPException(status_code=422, detail="invalid schedule_cron expression")
 
 
+def _policy_int(policy: dict[str, Any], key: str, *, minimum: int, maximum: int) -> int | None:
+    if key not in policy:
+        return None
+    try:
+        value = int(policy.get(key))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail=f"policy.{key} must be an integer")
+    if value < minimum or value > maximum:
+        raise HTTPException(status_code=422, detail=f"policy.{key} must be between {minimum} and {maximum}")
+    return value
+
+
+def _validate_binding_policy(policy: dict[str, Any]) -> None:
+    policy = policy or {}
+    if not isinstance(policy, dict):
+        raise HTTPException(status_code=422, detail="policy must be an object")
+
+    _policy_int(policy, "parallel_workers", minimum=1, maximum=64)
+    _policy_int(policy, "multipart_threshold_mb", minimum=5, maximum=512)
+    _policy_int(policy, "multipart_chunk_mb", minimum=5, maximum=128)
+    _policy_int(policy, "max_transfer_concurrency", minimum=1, maximum=64)
+
+    compression = policy.get("compression")
+    if compression is None:
+        return
+    if not isinstance(compression, dict):
+        raise HTTPException(status_code=422, detail="policy.compression must be an object")
+
+    algorithm = str(compression.get("algorithm", "gzip") or "gzip").lower()
+    if algorithm != "gzip":
+        raise HTTPException(status_code=422, detail="policy.compression.algorithm currently supports only 'gzip'")
+
+    if "level" in compression:
+        try:
+            level = int(compression.get("level"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="policy.compression.level must be an integer")
+        if level < 1 or level > 9:
+            raise HTTPException(status_code=422, detail="policy.compression.level must be between 1 and 9")
+
+    if "min_size_bytes" in compression:
+        try:
+            min_size_bytes = int(compression.get("min_size_bytes"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="policy.compression.min_size_bytes must be an integer")
+        if min_size_bytes < 0:
+            raise HTTPException(status_code=422, detail="policy.compression.min_size_bytes must be >= 0")
+
+    for list_field in ("include_extensions", "exclude_extensions"):
+        if list_field not in compression:
+            continue
+        value = compression.get(list_field)
+        if not isinstance(value, list):
+            raise HTTPException(status_code=422, detail=f"policy.compression.{list_field} must be a list of strings")
+        if not all(isinstance(item, str) for item in value):
+            raise HTTPException(status_code=422, detail=f"policy.compression.{list_field} must be a list of strings")
+
+
 def _ensure_source_type_enabled(source_type: SourceType) -> None:
     if source_type in TEMP_DISABLED_SOURCE_TYPES:
         raise HTTPException(
@@ -608,6 +666,7 @@ def create_binding(payload: BindingCreate, db: Session = Depends(get_db)) -> Bin
         raise HTTPException(status_code=404, detail="destination not found")
 
     _validate_schedule(payload.schedule_cron)
+    _validate_binding_policy(payload.policy or {})
 
     item = Binding(**payload.model_dump())
     db.add(item)
@@ -636,6 +695,7 @@ def update_binding(binding_id: int, payload: BindingCreate, db: Session = Depend
         raise HTTPException(status_code=404, detail="destination not found")
 
     _validate_schedule(payload.schedule_cron)
+    _validate_binding_policy(payload.policy or {})
 
     for key, value in payload.model_dump().items():
         setattr(item, key, value)
@@ -692,6 +752,8 @@ def validate_binding(binding_id: int, db: Session = Depends(get_db)) -> dict[str
     if destination is None:
         raise HTTPException(status_code=404, detail="destination not found")
 
+    _validate_binding_policy(binding.policy or {})
+
     source_result = _validate_source_connection(source)
     destination_result = _validate_destination_connection(destination, binding)
 
@@ -725,6 +787,7 @@ def validate_destination_payload(payload: DestinationCreate) -> dict[str, Any]:
 @app.post("/validate/binding")
 def validate_binding_payload(payload: BindingCreate, db: Session = Depends(get_db)) -> dict[str, Any]:
     _validate_schedule(payload.schedule_cron)
+    _validate_binding_policy(payload.policy or {})
 
     source = db.get(Source, payload.source_id)
     destination = db.get(Destination, payload.destination_id)
