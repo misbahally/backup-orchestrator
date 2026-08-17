@@ -432,6 +432,45 @@ def test_scheduler_marks_stale_queued_jobs_failed(monkeypatch):
     assert marked == 1
 
 
+def test_scheduler_reconciles_orphaned_running_jobs_at_startup(monkeypatch):
+    class FakeJob:
+        def get_status(self, refresh=True):
+            return "missing"
+
+    class FakeSession:
+        def __init__(self):
+            self.runs = []
+
+        def query(self, model):
+            return self
+
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def all(self):
+            return [
+                BackupRun(
+                    binding_id=1,
+                    status=RunStatus.running,
+                    started_at=scheduler._utcnow(),
+                    message="Running s3 backup (attempt 1)",
+                    queue_job_id="job-abc",
+                )
+            ]
+
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: FakeSession())
+    monkeypatch.setattr(scheduler.Job, "fetch", lambda job_id, connection=None: FakeJob())
+
+    marked = scheduler.reconcile_orphaned_runs(redis_conn=object())
+    assert marked == 1
+
+
 def test_database_dump_plugin_excludes_system_schemas_from_selection():
     source_settings = {
         "database": "mysql",

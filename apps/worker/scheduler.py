@@ -99,29 +99,15 @@ def enqueue_due_bindings() -> int:
         db.close()
 
 
-def reap_stale_running_runs() -> int:
-    timeout_raw = os.environ.get("RQ_JOB_TIMEOUT", "6h")
-    if timeout_raw.endswith("h"):
-        max_seconds = int(timeout_raw[:-1]) * 3600
-    elif timeout_raw.endswith("m"):
-        max_seconds = int(timeout_raw[:-1]) * 60
-    else:
-        max_seconds = int(timeout_raw)
-    grace_seconds = int(os.environ.get("RUN_STALE_GRACE_SECONDS", "300"))
-    cutoff = _utcnow() - timedelta(seconds=max_seconds + grace_seconds)
-
-    redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
-    redis_conn = Redis.from_url(redis_url)
-
+def reconcile_orphaned_runs(redis_conn=None, cutoff: datetime | None = None) -> int:
     db = SessionLocal()
     marked = 0
     try:
-        runs = (
-            db.query(BackupRun)
-            .filter(BackupRun.status.in_([RunStatus.running, RunStatus.queued]))
-            .filter(BackupRun.started_at < cutoff)
-            .all()
-        )
+        query = db.query(BackupRun).filter(BackupRun.status.in_([RunStatus.running, RunStatus.queued]))
+        if cutoff is not None:
+            query = query.filter(BackupRun.started_at < cutoff)
+
+        runs = query.all()
         for run in runs:
             job_id = _get_run_job_id(run)
             if not job_id:
@@ -150,6 +136,22 @@ def reap_stale_running_runs() -> int:
         return marked
     finally:
         db.close()
+
+
+def reap_stale_running_runs() -> int:
+    timeout_raw = os.environ.get("RQ_JOB_TIMEOUT", "6h")
+    if timeout_raw.endswith("h"):
+        max_seconds = int(timeout_raw[:-1]) * 3600
+    elif timeout_raw.endswith("m"):
+        max_seconds = int(timeout_raw[:-1]) * 60
+    else:
+        max_seconds = int(timeout_raw)
+    grace_seconds = int(os.environ.get("RUN_STALE_GRACE_SECONDS", "300"))
+    cutoff = _utcnow() - timedelta(seconds=max_seconds + grace_seconds)
+
+    redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
+    redis_conn = Redis.from_url(redis_url)
+    return reconcile_orphaned_runs(redis_conn=redis_conn, cutoff=cutoff)
 
 
 def run_scheduler_loop() -> None:

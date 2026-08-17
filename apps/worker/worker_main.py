@@ -5,6 +5,8 @@ from prometheus_client import start_http_server
 from redis import Redis
 from rq import Connection, Queue, Worker
 
+from scheduler import reconcile_orphaned_runs
+
 logging.basicConfig(level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO))
 
 
@@ -14,6 +16,7 @@ def main() -> None:
 
     redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
     conn = Redis.from_url(redis_url)
+    reconcile_orphaned_runs(redis_conn=conn)
     with Connection(conn):
         worker = Worker([Queue("backup-runs")])
         worker.work()
