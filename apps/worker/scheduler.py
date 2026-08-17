@@ -116,7 +116,12 @@ def reap_stale_running_runs() -> int:
     db = SessionLocal()
     marked = 0
     try:
-        runs = db.query(BackupRun).filter(BackupRun.status == RunStatus.running).filter(BackupRun.started_at < cutoff).all()
+        runs = (
+            db.query(BackupRun)
+            .filter(BackupRun.status.in_([RunStatus.running, RunStatus.queued]))
+            .filter(BackupRun.started_at < cutoff)
+            .all()
+        )
         for run in runs:
             job_id = _get_run_job_id(run)
             if not job_id:

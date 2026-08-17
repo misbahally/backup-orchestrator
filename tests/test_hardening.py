@@ -294,6 +294,46 @@ def test_run_backup_job_updates_status(monkeypatch):
         db.close()
 
 
+def test_scheduler_marks_stale_queued_jobs_failed(monkeypatch):
+    class FakeJob:
+        def get_status(self, refresh=True):
+            return "missing"
+
+    monkeypatch.setattr(scheduler, "SessionLocal", lambda: FakeSession())
+    monkeypatch.setattr(scheduler.Redis, "from_url", lambda url: object())
+    monkeypatch.setattr(scheduler.Job, "fetch", lambda job_id, connection=None: FakeJob())
+
+    class FakeSession:
+        def __init__(self):
+            self.runs = []
+
+        def query(self, model):
+            return self
+
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def all(self):
+            return [
+                BackupRun(
+                    binding_id=1,
+                    status=RunStatus.queued,
+                    started_at=scheduler._utcnow() - __import__("datetime").timedelta(days=2),
+                    message="Retrying (2 retries left): Task exceeded maximum timeout value (21600 seconds)",
+                    queue_job_id="job-abc",
+                )
+            ]
+
+        def commit(self):
+            return None
+
+        def close(self):
+            return None
+
+    marked = scheduler.reap_stale_running_runs()
+    assert marked == 1
+
+
 def test_database_dump_plugin_uploads_dump_to_destination(monkeypatch):
     uploaded = {}
 
