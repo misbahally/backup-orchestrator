@@ -37,17 +37,18 @@ def _normalise_engine_name(source: Any) -> str:
 
 
 def _selected_databases(source_settings: dict[str, Any]) -> list[str]:
+    system_schemas = {"information_schema", "mysql", "performance_schema", "sys", "innodb", "ndbinfo"}
     selected: list[str] = []
 
     raw_list = source_settings.get("databases")
     if isinstance(raw_list, list):
         for value in raw_list:
             name = str(value or "").strip()
-            if name and name not in selected:
+            if name and name not in selected and name.lower() not in system_schemas:
                 selected.append(name)
 
     single_database = str(source_settings.get("database", "")).strip()
-    if single_database and single_database not in selected:
+    if single_database and single_database not in selected and single_database.lower() not in system_schemas:
         selected.append(single_database)
 
     return selected

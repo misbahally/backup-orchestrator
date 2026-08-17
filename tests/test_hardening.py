@@ -28,6 +28,7 @@ from database import Base as WorkerBase
 from database import engine as worker_engine
 import scheduler
 import tasks
+import plugins.db_to_s3 as db_to_s3
 from models import BackupRun, Binding, Destination, RunStatus, Source, SourceType
 from plugins.db_to_s3 import _selected_databases, run_database_dump_to_s3
 
@@ -383,6 +384,15 @@ def test_scheduler_marks_stale_queued_jobs_failed(monkeypatch):
 
     marked = scheduler.reap_stale_running_runs()
     assert marked == 1
+
+
+def test_database_dump_plugin_excludes_system_schemas_from_selection():
+    source_settings = {
+        "database": "mysql",
+        "databases": ["information_schema", "app", "performance_schema", "app"],
+    }
+
+    assert db_to_s3._selected_databases(source_settings) == ["app"]
 
 
 def test_database_dump_plugin_uploads_dump_to_destination(monkeypatch):
