@@ -23,11 +23,16 @@ _ADMIN_PASSWORD_HASH = (
 
 
 def upgrade() -> None:
+    # Create enum types with IF NOT EXISTS to be idempotent on partial re-runs (PostgreSQL only)
+    if op.get_bind().dialect.name == "postgresql":
+        op.execute("CREATE TYPE IF NOT EXISTS sourcetype AS ENUM ('s3', 'mysql', 'postgresql', 'file', 'ebs', 'rds')")
+        op.execute("CREATE TYPE IF NOT EXISTS runstatus AS ENUM ('queued', 'running', 'success', 'failed', 'cancelled')")
+
     op.create_table(
         "sources",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("name", sa.String(120), nullable=False),
-        sa.Column("source_type", sa.Enum("s3", "mysql", "postgresql", "file", "ebs", "rds", name="sourcetype"), nullable=False),
+        sa.Column("source_type", sa.Enum("s3", "mysql", "postgresql", "file", "ebs", "rds", name="sourcetype", create_type=False), nullable=False),
         sa.Column("settings", sa.JSON(), nullable=True),
         sa.Column("is_active", sa.Boolean(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
@@ -69,7 +74,7 @@ def upgrade() -> None:
         "backup_runs",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("binding_id", sa.Integer(), nullable=False),
-        sa.Column("status", sa.Enum("queued", "running", "success", "failed", "cancelled", name="runstatus"), nullable=True),
+        sa.Column("status", sa.Enum("queued", "running", "success", "failed", "cancelled", name="runstatus", create_type=False), nullable=True),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("bytes_transferred", sa.BigInteger(), nullable=True),
@@ -88,8 +93,8 @@ def upgrade() -> None:
         "backup_run_status_history",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("backup_run_id", sa.Integer(), nullable=False),
-        sa.Column("old_status", sa.Enum("queued", "running", "success", "failed", "cancelled", name="runstatus"), nullable=True),
-        sa.Column("new_status", sa.Enum("queued", "running", "success", "failed", "cancelled", name="runstatus"), nullable=False),
+        sa.Column("old_status", sa.Enum("queued", "running", "success", "failed", "cancelled", name="runstatus", create_type=False), nullable=True),
+        sa.Column("new_status", sa.Enum("queued", "running", "success", "failed", "cancelled", name="runstatus", create_type=False), nullable=False),
         sa.Column("changed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("reason", sa.Text(), nullable=True),
         sa.ForeignKeyConstraint(["backup_run_id"], ["backup_runs.id"]),
