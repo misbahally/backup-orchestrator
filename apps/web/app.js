@@ -324,7 +324,70 @@ function getDatabaseSettingsFromForm() {
   if (password) settings.password = password;
   const secretRef = String(f.get("db_secret_ref") || "").trim();
   if (secretRef) settings.secret_ref = secretRef;
+
+  const selectedDatabases = Array.from(document.querySelectorAll("#db-database-options .db-database-checkbox:checked"))
+    .map((input) => String(input.value || "").trim())
+    .filter(Boolean);
+  if (selectedDatabases.length) {
+    settings.databases = selectedDatabases;
+    settings.database = selectedDatabases[0];
+  }
+
   return settings;
+}
+
+function clearDatabaseScanOptions(message = "Use scan to fetch databases, then select one or more.") {
+  const options = document.getElementById("db-database-options");
+  const status = document.getElementById("db-scan-status");
+  const actions = document.getElementById("db-scan-actions");
+  options.innerHTML = `<div class="small text-body-secondary">${escapeHtml(message)}</div>`;
+  status.textContent = message;
+  actions.classList.add("d-none");
+}
+
+function renderDatabaseScanOptions(databases, selectedDatabases = []) {
+  const options = document.getElementById("db-database-options");
+  const status = document.getElementById("db-scan-status");
+  const actions = document.getElementById("db-scan-actions");
+
+  const selectedSet = new Set((selectedDatabases || []).map((value) => String(value || "").trim()).filter(Boolean));
+  if (!databases.length) {
+    clearDatabaseScanOptions("No databases returned by server.");
+    return;
+  }
+
+  options.innerHTML = databases.map((name, index) => {
+    const escapedName = escapeHtml(name);
+    const checked = selectedSet.has(name) ? "checked" : "";
+    return `
+      <div class="form-check">
+        <input class="form-check-input db-database-checkbox" type="checkbox" value="${escapedName}" id="db-option-${index}" ${checked} />
+        <label class="form-check-label small" for="db-option-${index}">${escapedName}</label>
+      </div>
+    `;
+  }).join("");
+  status.textContent = `Found ${databases.length} database${databases.length === 1 ? "" : "s"}. Select one or more.`;
+  actions.classList.remove("d-none");
+}
+
+async function scanDatabasesFromSourceForm() {
+  const form = document.getElementById("source-form");
+  const sourceType = String(form.querySelector("[name='source_type']").value || "").trim();
+  if (sourceType !== "mysql" && sourceType !== "postgresql") {
+    throw new Error("Database scan is available only for mysql and postgresql sources");
+  }
+
+  const payload = {
+    source_type: sourceType,
+    settings: getDatabaseSettingsFromForm(),
+  };
+
+  const result = await api("/sources/scan-databases", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  renderDatabaseScanOptions(result.databases || [], result.selected_databases || []);
+  return result;
 }
 
 function getFileSettingsFromForm() {
@@ -442,6 +505,7 @@ function resetSourceEditState() {
   form.querySelector("[name='is_active']").value = "true";
   form.querySelector("[name='source_type']").value = "s3";
   form.querySelector("[name='s3_region']").value = "us-east-1";
+  clearDatabaseScanOptions();
   toggleSourceSettingsVisibility();
   document.getElementById("source-submit-btn").textContent = "Save Source";
   setDrawerTitle("source-drawer-title", "New Source");
@@ -469,6 +533,18 @@ function startSourceEdit(source) {
   form.querySelector("[name='file_exclude_globs']").value = (settings.exclude_globs || []).join(", ");
   form.querySelector("[name='file_follow_symlinks']").value = String(Boolean(settings.follow_symlinks));
   form.querySelector("[name='file_key_prefix']").value = settings.key_prefix || "";
+  form.querySelector("[name='db_host']").value = settings.host || "";
+  form.querySelector("[name='db_port']").value = settings.port || "";
+  form.querySelector("[name='db_database']").value = settings.database || "";
+  form.querySelector("[name='db_username']").value = settings.username || "";
+  form.querySelector("[name='db_password']").value = settings.password || "";
+  form.querySelector("[name='db_secret_ref']").value = settings.secret_ref || "";
+  const selectedDatabases = Array.isArray(settings.databases) ? settings.databases : (settings.database ? [settings.database] : []);
+  if (selectedDatabases.length) {
+    renderDatabaseScanOptions(selectedDatabases, selectedDatabases);
+  } else {
+    clearDatabaseScanOptions();
+  }
   form.querySelector("[name='is_active']").value = String(Boolean(source.is_active));
   toggleSourceSettingsVisibility();
   document.getElementById("source-submit-btn").textContent = "Save Source";
@@ -1103,6 +1179,24 @@ async function boot() {
 
   const sourceForm = document.getElementById("source-form");
   sourceForm.querySelector("[name='source_type']").addEventListener("change", toggleSourceSettingsVisibility);
+  document.getElementById("scan-databases-btn").addEventListener("click", async () => {
+    try {
+      const result = await scanDatabasesFromSourceForm();
+      setFlash(result.message || "Databases scanned");
+    } catch (err) {
+      setFlash(`Database scan failed: ${err.message}`, "danger");
+    }
+  });
+  document.getElementById("select-all-databases-btn").addEventListener("click", () => {
+    document.querySelectorAll("#db-database-options .db-database-checkbox").forEach((input) => {
+      input.checked = true;
+    });
+  });
+  document.getElementById("clear-all-databases-btn").addEventListener("click", () => {
+    document.querySelectorAll("#db-database-options .db-database-checkbox").forEach((input) => {
+      input.checked = false;
+    });
+  });
   toggleSourceSettingsVisibility();
   sourceForm.addEventListener("submit", async (e) => {
     e.preventDefault();

@@ -45,6 +45,7 @@ from .schemas import (
     RunCancelRequest,
     RunRead,
     SourceCreate,
+    SourceDatabaseScanRequest,
     SourceRead,
 )
 from .secret_resolver import resolve_secret_mapping, resolve_secret_text
@@ -189,16 +190,96 @@ def _validate_file_source(source: Source) -> dict[str, Any]:
     return {"ok": ok, "message": "File source validated" if ok else "File source validation failed", "checks": checks}
 
 
+def _selected_databases_from_settings(source_settings: dict[str, Any]) -> list[str]:
+    selected: list[str] = []
+
+    raw_list = source_settings.get("databases")
+    if isinstance(raw_list, list):
+        for value in raw_list:
+            name = str(value or "").strip()
+            if name and name not in selected:
+                selected.append(name)
+
+    single_database = str(source_settings.get("database", "")).strip()
+    if single_database and single_database not in selected:
+        selected.append(single_database)
+
+    return selected
+
+
+def _scan_db_databases(source_type: SourceType, source_settings: dict[str, Any]) -> dict[str, Any]:
+    engine_name = source_type.value
+    if engine_name not in {"mysql", "postgresql"}:
+        raise HTTPException(status_code=400, detail="database scan supports only mysql and postgresql sources")
+
+    host = str(source_settings.get("host", "")).strip()
+    username = str(source_settings.get("username", "")).strip()
+    password = str(source_settings.get("password", "")).strip()
+    port = int(source_settings.get("port", 5432 if engine_name == "postgresql" else 3306))
+    selected = _selected_databases_from_settings(source_settings)
+
+    if not host or not username:
+        missing = [k for k, v in (("host", host), ("username", username)) if not v]
+        raise HTTPException(status_code=400, detail=f"{engine_name} source requires settings.{', settings.'.join(missing)}")
+
+    try:
+        if engine_name == "postgresql":
+            probe_db = str(source_settings.get("database", "")).strip() or "postgres"
+            conn = psycopg2.connect(host=host, port=port, dbname=probe_db, user=username, password=password, connect_timeout=5)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT datname FROM pg_database "
+                        "WHERE datallowconn = true AND datistemplate = false "
+                        "ORDER BY datname"
+                    )
+                    databases = [str(row[0]) for row in cur.fetchall() if row and row[0]]
+            finally:
+                conn.close()
+        else:
+            conn_kwargs: dict[str, Any] = {
+                "host": host,
+                "port": port,
+                "user": username,
+                "password": password,
+                "connect_timeout": 5,
+            }
+            probe_db = str(source_settings.get("database", "")).strip()
+            if probe_db:
+                conn_kwargs["database"] = probe_db
+            conn = mysql_connect(**conn_kwargs)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SHOW DATABASES")
+                    databases = [str(row[0]) for row in cur.fetchall() if row and row[0]]
+            finally:
+                conn.close()
+    except Exception as exc:
+        detail = str(exc)
+        if password:
+            detail = detail.replace(password, "***")
+        raise HTTPException(status_code=400, detail=f"{engine_name} database scan failed: {detail}")
+
+    return {
+        "ok": True,
+        "engine": engine_name,
+        "databases": databases,
+        "selected_databases": selected,
+        "message": f"Found {len(databases)} databases",
+    }
+
+
 def _validate_db_source(source: Source, engine_name: str) -> dict[str, Any]:
     source_settings = source.settings or {}
     host = str(source_settings.get("host", "")).strip()
-    database = str(source_settings.get("database", "")).strip()
+    selected_databases = _selected_databases_from_settings(source_settings)
+    database = selected_databases[0] if selected_databases else ""
     username = str(source_settings.get("username", "")).strip()
     port = int(source_settings.get("port", 5432 if engine_name == "postgresql" else 3306))
     password = str(source_settings.get("password", "")).strip()
 
     checks: list[dict[str, Any]] = []
-    if not host or not database or not username:
+    if not host or not username or not selected_databases:
         missing = [k for k, v in (("host", host), ("database", database), ("username", username)) if not v]
         raise HTTPException(status_code=400, detail=f"{engine_name} source requires settings.{', settings.'.join(missing)}")
 
@@ -220,6 +301,7 @@ def _validate_db_source(source: Source, engine_name: str) -> dict[str, Any]:
             finally:
                 conn.close()
         checks.append({"name": "connect", "passed": True, "detail": f"Connected to {host}:{port}/{database}"})
+        checks.append({"name": "selected_databases", "passed": True, "detail": ", ".join(selected_databases)})
         return {"ok": True, "message": f"{engine_name} source is reachable", "checks": checks}
     except Exception as exc:
         checks.append({"name": "connect", "passed": False, "detail": str(exc).replace(password, "***") if password else str(exc)})
@@ -625,6 +707,12 @@ def validate_source_payload(payload: SourceCreate) -> dict[str, Any]:
     _ensure_source_type_enabled(payload.source_type)
     source = Source(**payload.model_dump())
     return _validate_source_connection(source)
+
+
+@app.post("/sources/scan-databases")
+def scan_source_databases(payload: SourceDatabaseScanRequest) -> dict[str, Any]:
+    _ensure_source_type_enabled(payload.source_type)
+    return _scan_db_databases(payload.source_type, payload.settings or {})
 
 
 @app.post("/validate/destination")

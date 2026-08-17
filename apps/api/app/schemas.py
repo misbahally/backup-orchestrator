@@ -78,6 +78,11 @@ class SourceCreate(BaseModel):
     is_active: bool = True
 
 
+class SourceDatabaseScanRequest(BaseModel):
+    source_type: SourceType
+    settings: dict = {}
+
+
 class SourceRead(SourceCreate):
     id: int
 

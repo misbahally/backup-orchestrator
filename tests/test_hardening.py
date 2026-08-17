@@ -29,7 +29,7 @@ from database import engine as worker_engine
 import scheduler
 import tasks
 from models import BackupRun, Binding, Destination, RunStatus, Source, SourceType
-from plugins.db_to_s3 import run_database_dump_to_s3
+from plugins.db_to_s3 import _selected_databases, run_database_dump_to_s3
 
 
 @pytest.fixture(autouse=True)
@@ -110,6 +110,57 @@ def test_validation_endpoints_return_structured_results(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
+
+
+def test_scan_postgresql_databases_returns_discovered_list(monkeypatch):
+    class FakeCursor:
+        def execute(self, query):
+            self.query = query
+
+        def fetchall(self):
+            return [("app_db",), ("analytics",)]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeConn:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(api_main.psycopg2, "connect", lambda **kwargs: FakeConn())
+
+    client = TestClient(api_app, headers=TEST_API_HEADERS)
+    response = client.post(
+        "/sources/scan-databases",
+        json={
+            "source_type": "postgresql",
+            "settings": {
+                "host": "db.local",
+                "port": 5432,
+                "username": "backup_user",
+                "password": "secret",
+                "database": "postgres",
+                "databases": ["analytics"],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["databases"] == ["app_db", "analytics"]
+    assert payload["selected_databases"] == ["analytics", "postgres"]
+
+
+def test_selected_databases_normalizes_values():
+    assert _selected_databases({"databases": ["db1", " db2 ", "db1", ""], "database": "db3"}) == ["db1", "db2", "db3"]
+    assert _selected_databases({"database": "main"}) == ["main"]
 
 
 def test_cron_validation_rejects_invalid_expression():

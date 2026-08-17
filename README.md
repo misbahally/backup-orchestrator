@@ -106,6 +106,103 @@ export AWS_DEFAULT_REGION=us-east-1
 See [docs/README.md](docs/README.md) for full documentation, including
 [getting started](docs/getting-started.md) and [API usage](docs/api-usage.md) guides.
 
+## Database Source Least Privileges (Scan + Dump)
+
+For MySQL and PostgreSQL sources, create a dedicated backup user with the minimum
+permissions needed for:
+
+- Scanning database names in the UI/API (Scan Databases)
+- Running logical dumps in the worker
+
+### PostgreSQL
+
+Scan databases:
+
+- CONNECT on the probe database used for scan (defaults to postgres if settings.database is empty)
+- Ability to read pg_database (default installs usually allow this; hardening may restrict it)
+
+Dump selected databases:
+
+- CONNECT on each selected database
+- USAGE on schemas that contain objects to back up
+- SELECT on tables/views/materialized views to be dumped
+- SELECT on sequences used by dumped tables
+
+Notes:
+
+- Superuser is not required.
+- If scan returns fewer databases than expected, permissions are likely restricted by policy.
+
+Example (adjust DB names/schemas/host/user):
+
+```sql
+-- Run as an admin role.
+CREATE ROLE backup_user LOGIN PASSWORD 'REPLACE_WITH_STRONG_PASSWORD';
+
+-- Optional but recommended hardening.
+ALTER ROLE backup_user NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+
+-- Scan support: allow connecting to the probe DB used by scan.
+GRANT CONNECT ON DATABASE postgres TO backup_user;
+
+-- Repeat per database you plan to dump.
+GRANT CONNECT ON DATABASE app_db TO backup_user;
+\c app_db
+
+-- Replace public with your actual schema(s).
+GRANT USAGE ON SCHEMA public TO backup_user;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO backup_user;
+GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO backup_user;
+
+-- Ensure future objects remain dump-readable.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT SELECT ON TABLES TO backup_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT SELECT ON SEQUENCES TO backup_user;
+```
+
+### MySQL / MariaDB
+
+Scan databases:
+
+- Permission to run SHOW DATABASES (or per-database visibility via granted privileges)
+
+Dump selected databases (current worker uses mysqldump default behavior):
+
+- SELECT on objects to be dumped
+- SHOW VIEW for views
+- TRIGGER for triggers
+- LOCK TABLES on dumped databases (required by mysqldump default locking behavior)
+
+Notes:
+
+- Global admin privileges are not required.
+- If you want to avoid LOCK TABLES, worker dump flags would need to change (for example single-transaction strategy for InnoDB).
+
+Example (adjust host/db/user):
+
+```sql
+-- Run as an admin user.
+CREATE USER 'backup_user'@'10.%' IDENTIFIED BY 'REPLACE_WITH_STRONG_PASSWORD';
+
+-- Optional scan support for SHOW DATABASES.
+GRANT SHOW DATABASES ON *.* TO 'backup_user'@'10.%';
+
+-- Repeat per database you plan to dump.
+GRANT SELECT, SHOW VIEW, TRIGGER, LOCK TABLES ON app_db.* TO 'backup_user'@'10.%';
+GRANT SELECT, SHOW VIEW, TRIGGER, LOCK TABLES ON analytics_db.* TO 'backup_user'@'10.%';
+
+FLUSH PRIVILEGES;
+```
+
+If you prefer host-specific access, use 'backup_user'@'db-backup-worker-host' instead of a wildcard host.
+
+### Practical Guidance
+
+- Grant privileges only on databases you actually plan to back up.
+- Use a separate read-only backup account per environment.
+- Rotate credentials and store them via source settings secret_ref rather than hardcoding.
+
 ## High-Level Data Model
 
 - `destinations`: S3-compatible destination definitions

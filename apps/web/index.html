@@ -430,6 +430,18 @@
                 <label class="form-label small mb-1">Secret Ref</label>
                 <input class="form-control form-control-sm" name="db_secret_ref" placeholder="vault path or secret name" />
               </div>
+              <div class="col-12">
+                <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                  <label class="form-label small mb-0">Databases To Dump</label>
+                  <button class="btn btn-outline-secondary btn-sm" type="button" id="scan-databases-btn">Scan Databases</button>
+                </div>
+                <div class="small text-body-secondary mb-2" id="db-scan-status">Use scan to fetch databases, then select one or more.</div>
+                <div id="db-scan-actions" class="d-none mb-2">
+                  <button class="btn btn-link btn-sm p-0 me-2" type="button" id="select-all-databases-btn">Select all</button>
+                  <button class="btn btn-link btn-sm p-0" type="button" id="clear-all-databases-btn">Clear all</button>
+                </div>
+                <div id="db-database-options" class="border rounded p-2 bg-body"></div>
+              </div>
             </div>
           </div>
           <div id="file-settings-panel" class="border rounded p-3 bg-body-tertiary d-none">
