@@ -312,6 +312,33 @@ def test_cancel_run_uses_persisted_queue_job_id_for_retry_messages(monkeypatch):
     assert run.status == RunStatus.cancelled
 
 
+def test_cancel_run_marks_running_job_cancelled_immediately(monkeypatch):
+    class FakeJob:
+        def get_status(self, refresh=True):
+            return "busy"
+
+    def fake_send_stop_job_command(connection, job_id):
+        assert job_id == "job-running"
+
+    monkeypatch.setattr(api_main.Job, "fetch", lambda job_id, connection=None: FakeJob())
+    monkeypatch.setattr(api_main, "send_stop_job_command", fake_send_stop_job_command)
+
+    run = BackupRun(
+        binding_id=1,
+        status=RunStatus.running,
+        message="Running s3 backup (attempt 1)",
+        queue_job_id="job-running",
+    )
+    q = SimpleNamespace(connection=object())
+    db = SimpleNamespace(commit=lambda: None)
+
+    ok, reason = api_main._cancel_run(run, q, db)
+
+    assert ok is True
+    assert reason == "cancellation requested"
+    assert run.status == RunStatus.cancelled
+
+
 def test_run_backup_job_updates_status(monkeypatch):
     monkeypatch.setattr(tasks, "run_s3_to_s3", lambda source, destination, binding: {"copied_objects": 1, "skipped_objects": 0, "transferred_bytes": 7})
 

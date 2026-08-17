@@ -788,6 +788,8 @@ def _cancel_run(run: BackupRun, q: Queue, db: Session) -> tuple[bool, str]:
     except Exception:
         if run.status.value == "queued":
             return False, "queue job no longer exists"
+        run.status = RunStatus.cancelled
+        run.finished_at = datetime.now(timezone.utc)
         run.message = "Cancellation requested (worker is already running)"
         db.commit()
         return True, "cancellation requested"
@@ -804,6 +806,8 @@ def _cancel_run(run: BackupRun, q: Queue, db: Session) -> tuple[bool, str]:
 
     if status in {"started", "busy"}:
         send_stop_job_command(q.connection, job_id)
+        run.status = RunStatus.cancelled
+        run.finished_at = datetime.now(timezone.utc)
         run.message = "Cancellation requested"
         db.commit()
         return True, "cancellation requested"
