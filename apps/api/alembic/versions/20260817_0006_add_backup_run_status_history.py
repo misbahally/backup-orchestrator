@@ -16,6 +16,17 @@ depends_on = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+
+    bind.execute(sa.text("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'runstatus') THEN
+                CREATE TYPE runstatus AS ENUM ('queued', 'running', 'success', 'failed', 'cancelled');
+            END IF;
+        END $$;
+    """))
+
     op.create_table(
         "backup_run_status_history",
         sa.Column("id", sa.Integer(), nullable=False),
