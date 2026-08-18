@@ -48,6 +48,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           SHOULD_BUILD="true"
           TAG=""
 
@@ -59,42 +60,19 @@ jobs:
             fi
           else
             RUN_ID="${{ github.event.workflow_run.id }}"
-            STEP_CONCLUSION=$(curl -fsSL \
+            RUN_JOBS_JSON=$(curl -fsSL \
               -H "Authorization: Bearer $GITHUB_TOKEN" \
               -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" | python - <<'PY'
-            import json
-            import sys
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100")
 
-            payload = json.load(sys.stdin)
-            conclusion = ""
-            for job in payload.get("jobs", []):
-                if job.get("name") != "tag-version":
-                    continue
-                for step in job.get("steps", []):
-                    if step.get("name") == "Create and push tag":
-                        conclusion = step.get("conclusion") or ""
-                        break
-            print(conclusion)
-            PY
-            )
+            STEP_CONCLUSION=$(printf '%s' "$RUN_JOBS_JSON" | python -c "import json,sys; payload=json.load(sys.stdin); print(next((step.get('conclusion') or '' for job in payload.get('jobs', []) if job.get('name') == 'tag-version' for step in job.get('steps', []) if step.get('name') == 'Create and push tag'), ''))")
 
             if [ "$STEP_CONCLUSION" != "success" ]; then
               echo "Auto Tag did not create a new tag (step conclusion: ${STEP_CONCLUSION:-none}); skipping build."
               SHOULD_BUILD="false"
             fi
 
-            VERSION=$(python - <<'PY'
-            import re
-            from pathlib import Path
-
-            content = Path("libs/orchestrator_core/orchestrator_core/__init__.py").read_text(encoding="utf-8")
-            match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']\s*$', content, re.MULTILINE)
-            if not match:
-                raise SystemExit("Could not find __version__ in libs/orchestrator_core/orchestrator_core/__init__.py")
-            print(match.group(1).strip())
-            PY
-            )
+            VERSION=$(python -c "import pathlib,re; content=pathlib.Path('libs/orchestrator_core/orchestrator_core/__init__.py').read_text(encoding='utf-8'); m=re.search(r'^__version__\\s*=\\s*[\"\\\']([^\"\\\']+)[\"\\\']\\s*$', content, re.MULTILINE); assert m, 'Could not find __version__ in libs/orchestrator_core/orchestrator_core/__init__.py'; print(m.group(1).strip())")
 
             TAG="v${VERSION}"
 
