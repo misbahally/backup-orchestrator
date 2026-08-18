@@ -72,7 +72,7 @@ jobs:
               SHOULD_BUILD="false"
             fi
 
-            VERSION=$(python -c "import pathlib,re; content=pathlib.Path('libs/orchestrator_core/orchestrator_core/__init__.py').read_text(encoding='utf-8'); m=re.search(r'^__version__\\s*=\\s*[\"\\\']([^\"\\\']+)[\"\\\']\\s*$', content, re.MULTILINE); assert m, 'Could not find __version__ in libs/orchestrator_core/orchestrator_core/__init__.py'; print(m.group(1).strip())")
+            VERSION=$(python -c "import ast,pathlib; tree=ast.parse(pathlib.Path('libs/orchestrator_core/orchestrator_core/__init__.py').read_text(encoding='utf-8')); values=[node.value.value for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == '__version__' for target in node.targets) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)]; assert len(values) == 1, 'Expected exactly one string __version__ assignment'; print(values[0].strip())")
 
             TAG="v${VERSION}"
 
