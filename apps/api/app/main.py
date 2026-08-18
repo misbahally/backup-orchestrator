@@ -21,6 +21,7 @@ from rq.job import Job
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import psycopg2
+from orchestrator_core import __version__ as APP_VERSION
 
 from .auth import (
     ADMIN_USERNAME,
@@ -60,11 +61,16 @@ TEMP_DISABLED_SOURCE_TYPES = {SourceType.ebs, SourceType.rds}
 
 app = FastAPI(
     title="Backup Control Plane API",
-    version="0.2.0",
+    version=APP_VERSION,
     docs_url="/docs" if settings.expose_docs else None,
     redoc_url="/redoc" if settings.expose_docs else None,
     openapi_url="/openapi.json" if settings.expose_docs else None,
 )
+
+
+@app.on_event("startup")
+async def log_startup_version() -> None:
+    logger.info("Backup API starting (version v%s)", APP_VERSION)
 
 app.add_middleware(
     CORSMiddleware,
@@ -514,7 +520,7 @@ def _enqueue_run(run: BackupRun, q: Queue) -> BackupRun:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 @app.post("/auth/login", response_model=LoginResponse)

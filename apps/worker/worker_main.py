@@ -4,13 +4,16 @@ import os
 from prometheus_client import start_http_server
 from redis import Redis
 from rq import Connection, Queue, Worker
+from orchestrator_core import __version__ as APP_VERSION
 
 from scheduler import reconcile_orphaned_runs
 
 logging.basicConfig(level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO))
+logger = logging.getLogger("backup-worker")
 
 
 def main() -> None:
+    logger.info("Worker starting (version v%s)", APP_VERSION)
     metrics_port = int(os.environ.get("METRICS_PORT", "9090"))
     start_http_server(metrics_port)
 

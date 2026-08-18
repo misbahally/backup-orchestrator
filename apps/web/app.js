@@ -167,12 +167,37 @@ function setFlash(message, kind = "success") {
 }
 
 function renderFrontendBuildRef() {
-  const target = document.getElementById("frontend-build-ref");
+  const target = document.getElementById("app-version-ref");
   if (!target) {
     return;
   }
-  const ref = String(FRONTEND_BUILD_REF || "").trim();
-  target.textContent = `build: ${ref || "unknown"}`;
+  target.textContent = "version: unknown";
+}
+
+async function renderAppVersion() {
+  const target = document.getElementById("app-version-ref");
+  if (!target) {
+    return;
+  }
+
+  let version = "unknown";
+  try {
+    const response = await fetch(`${apiBase}/health`);
+    if (response.ok) {
+      const payload = await response.json();
+      const value = String(payload?.version || "").trim();
+      if (value) {
+        version = value;
+      }
+    }
+  } catch (err) {
+    // Keep unknown when health endpoint is unavailable.
+  }
+
+  target.textContent = `version: v${version}`;
+
+  const buildRef = String(FRONTEND_BUILD_REF || "").trim() || "unknown";
+  console.info(`Backup Control Plane frontend starting (version v${version}, build ${buildRef})`);
 }
 
 function renderValidationCard(container, title, result) {
@@ -1266,6 +1291,7 @@ async function refreshDashboard() {
 async function boot() {
   initTheme();
   renderFrontendBuildRef();
+  await renderAppVersion();
 
   document.getElementById("theme-toggle-btn").addEventListener("click", toggleTheme);
 

@@ -8,6 +8,7 @@ from prometheus_client import start_http_server
 from redis import Redis
 from rq import Queue, Retry
 from rq.job import Job
+from orchestrator_core import __version__ as APP_VERSION
 
 from database import SessionLocal
 from metrics import SCHEDULER_ENQUEUED_RUNS_TOTAL
@@ -157,6 +158,7 @@ def reap_stale_running_runs() -> int:
 def run_scheduler_loop() -> None:
     interval_seconds = int(os.environ.get("SCHEDULER_INTERVAL_SECONDS", "60"))
     metrics_port = int(os.environ.get("METRICS_PORT", "9090"))
+    logger.info("Scheduler starting (version v%s)", APP_VERSION)
     start_http_server(metrics_port)
 
     while True:
