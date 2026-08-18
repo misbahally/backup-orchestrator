@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_run:
+    workflows: ["Auto Tag Version"]
+    types:
+      - completed
 
 env:
   REGISTRY: docker.io
@@ -11,13 +15,20 @@ env:
 
 jobs:
   build-push:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'master')
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
+    env:
+      SOURCE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.ref }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -34,17 +45,84 @@ jobs:
 
       - name: Compute image tag
         id: meta
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          if [ -z "$TAG" ]; then
-            echo "No tag found for this build ref: ${GITHUB_REF}" >&2
-            exit 1
+          SHOULD_BUILD="true"
+          TAG=""
+
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            TAG="${GITHUB_REF_NAME}"
+            if [ -z "$TAG" ]; then
+              echo "No tag found for push ref: ${GITHUB_REF}" >&2
+              exit 1
+            fi
+          else
+            RUN_ID="${{ github.event.workflow_run.id }}"
+            STEP_CONCLUSION=$(curl -fsSL \
+              -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100" | python - <<'PY'
+            import json
+            import sys
+
+            payload = json.load(sys.stdin)
+            conclusion = ""
+            for job in payload.get("jobs", []):
+                if job.get("name") != "tag-version":
+                    continue
+                for step in job.get("steps", []):
+                    if step.get("name") == "Create and push tag":
+                        conclusion = step.get("conclusion") or ""
+                        break
+            print(conclusion)
+            PY
+            )
+
+            if [ "$STEP_CONCLUSION" != "success" ]; then
+              echo "Auto Tag did not create a new tag (step conclusion: ${STEP_CONCLUSION:-none}); skipping build."
+              SHOULD_BUILD="false"
+            fi
+
+            VERSION=$(python - <<'PY'
+            import re
+            from pathlib import Path
+
+            content = Path("libs/orchestrator_core/orchestrator_core/__init__.py").read_text(encoding="utf-8")
+            match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']\s*$', content, re.MULTILINE)
+            if not match:
+                raise SystemExit("Could not find __version__ in libs/orchestrator_core/orchestrator_core/__init__.py")
+            print(match.group(1).strip())
+            PY
+            )
+
+            TAG="v${VERSION}"
+
+            if [ "$SHOULD_BUILD" = "true" ]; then
+              git fetch --tags origin
+              TAG_SHA=$(git rev-list -n 1 "$TAG" 2>/dev/null || true)
+              if [ -z "$TAG_SHA" ]; then
+                echo "Tag ${TAG} not found; skipping build."
+                SHOULD_BUILD="false"
+              elif [ "$TAG_SHA" != "$SOURCE_SHA" ]; then
+                echo "Tag ${TAG} points to ${TAG_SHA}, not ${SOURCE_SHA}; skipping build."
+                SHOULD_BUILD="false"
+              fi
+            fi
           fi
-          COMMIT_HASH=$(echo "${{ github.sha }}" | cut -c 1-7)
+
+          COMMIT_HASH=$(echo "$SOURCE_SHA" | cut -c 1-7)
+          echo "should_build=$SHOULD_BUILD" >> "$GITHUB_OUTPUT"
           echo "commit_hash=$COMMIT_HASH" >> "$GITHUB_OUTPUT"
           echo "image_tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Skip build summary
+        if: steps.meta.outputs.should_build != 'true'
+        run: |
+          echo "No matching release tag on this commit; build skipped."
+
       - name: Build and push API image
+        if: steps.meta.outputs.should_build == 'true'
         id: build_api
         uses: docker/build-push-action@v5
         with:
@@ -59,6 +137,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE_BASE }}-api:buildcache,mode=max
 
       - name: Build and push Worker image
+        if: steps.meta.outputs.should_build == 'true'
         id: build_worker
         uses: docker/build-push-action@v5
         with:
@@ -73,6 +152,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE_BASE }}-worker:buildcache,mode=max
 
       - name: Build and push Web image
+        if: steps.meta.outputs.should_build == 'true'
         id: build_web
         uses: docker/build-push-action@v5
         with:
@@ -89,6 +169,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE_BASE }}-web:buildcache,mode=max
 
       - name: Publish image digest summary
+        if: steps.meta.outputs.should_build == 'true'
         run: |
           {
             echo "### Published image digests";
