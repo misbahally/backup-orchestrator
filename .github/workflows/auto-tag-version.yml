@@ -1,0 +1,83 @@
+name: Auto Tag Version
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - libs/orchestrator_core/orchestrator_core/__init__.py
+
+permissions:
+  contents: write
+
+jobs:
+  tag-version:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract current and previous version
+        id: version
+        run: |
+          CURRENT_VERSION=$(python - <<'PY'
+          import re
+          from pathlib import Path
+
+          content = Path("libs/orchestrator_core/orchestrator_core/__init__.py").read_text(encoding="utf-8")
+          match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']\s*$', content, re.MULTILINE)
+          if not match:
+              raise SystemExit("Could not find __version__ in libs/orchestrator_core/orchestrator_core/__init__.py")
+          print(match.group(1).strip())
+          PY
+          )
+
+          PREVIOUS_VERSION=$(git show HEAD^:libs/orchestrator_core/orchestrator_core/__init__.py 2>/dev/null | python - <<'PY'
+          import re
+          import sys
+
+          content = sys.stdin.read()
+          match = re.search(r'^__version__\s*=\s*["\']([^"\']+)["\']\s*$', content, re.MULTILINE)
+          print(match.group(1).strip() if match else "")
+          PY
+          )
+
+          if [ -z "$CURRENT_VERSION" ]; then
+            echo "Failed to extract current version" >&2
+            exit 1
+          fi
+
+          TAG_NAME="v${CURRENT_VERSION}"
+
+          echo "current=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "previous=$PREVIOUS_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if version unchanged
+        if: ${{ steps.version.outputs.current == steps.version.outputs.previous }}
+        run: |
+          echo "Version unchanged (${{ steps.version.outputs.current }}); skipping tag creation."
+
+      - name: Create and push tag
+        if: ${{ steps.version.outputs.current != steps.version.outputs.previous }}
+        env:
+          TAG_NAME: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag $TAG_NAME already exists locally; skipping."
+            exit 0
+          fi
+
+          if git ls-remote --tags origin "$TAG_NAME" | grep -q "$TAG_NAME"; then
+            echo "Tag $TAG_NAME already exists on origin; skipping."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag "$TAG_NAME"
+          git push origin "$TAG_NAME"
