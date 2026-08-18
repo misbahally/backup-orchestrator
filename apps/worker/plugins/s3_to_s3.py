@@ -367,7 +367,9 @@ def _copy_one_object(
     compress_this = _should_compress(source_key, size, compression)
 
     if compress_this:
-        destination_head = _head_object_if_exists(dst_client, destination_bucket, target_key)
+        destination_head = None
+        if target_key in destination_objects:
+            destination_head = _head_object_if_exists(dst_client, destination_bucket, target_key)
         should_copy = _should_copy_with_compression(
             size,
             source_last_modified,

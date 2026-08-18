@@ -280,6 +280,70 @@ def test_sse_aws_secrets_region_override_is_used(monkeypatch):
     assert resolved == "from-secret-region"
 
 
+def test_compressed_copy_skips_head_when_destination_is_missing(monkeypatch, tmp_path):
+    from boto3.s3.transfer import TransferConfig
+    from plugins.s3_to_s3 import _copy_one_object
+
+    class SourceBody:
+        def close(self):
+            pass
+
+    class SourceClient:
+        def get_object(self, **kwargs):
+            return {"Body": SourceBody(), "Metadata": {}, "ContentType": "text/plain"}
+
+    class DestinationClient:
+        def upload_file(self, filename, bucket, key, **kwargs):
+            assert bucket == "destination"
+            assert key == "logs/example.txt"
+
+    compressed_file = tmp_path / "example.txt.gz"
+    compressed_file.write_bytes(b"compressed")
+    monkeypatch.setattr(
+        "plugins.s3_to_s3._gzip_to_tempfile",
+        lambda stream, compression_level: (str(compressed_file), 7),
+    )
+    monkeypatch.setattr(
+        "plugins.s3_to_s3._head_object_if_exists",
+        lambda *args, **kwargs: pytest.fail("HEAD should not be called for an unlisted destination object"),
+    )
+
+    result = _copy_one_object(
+        source_key="logs/example.txt",
+        source_meta={"size": 7, "last_modified": None},
+        source_bucket="source",
+        source_prefix="",
+        dest_prefix="",
+        src_client=SourceClient(),
+        dst_client=DestinationClient(),
+        source_encryption={},
+        destination_encryption={},
+        src_region="us-east-1",
+        src_creds={},
+        destination_bucket="destination",
+        destination_objects={},
+        transfer_config=TransferConfig(),
+        size_only=False,
+        exact_timestamps=False,
+        compression={
+            "enabled": True,
+            "algorithm": "gzip",
+            "level": 6,
+            "min_size_bytes": 0,
+            "include_extensions": [".txt"],
+            "exclude_extensions": [],
+        },
+    )
+
+    assert result == {
+        "source_key": "logs/example.txt",
+        "target_key": "logs/example.txt",
+        "copied": 1,
+        "skipped": 0,
+        "transferred_bytes": 7,
+    }
+
+
 def test_scheduler_should_enqueue_when_cron_due():
     binding = SimpleNamespace(id=1, schedule_cron="* * * * *", last_scheduled_at=None)
     now = scheduler._utcnow()
