@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "apps" / "worker"))
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{ROOT / '.pytest_cache' / 'backup_control.sqlite'}")
 os.environ.setdefault("FILE_SOURCE_ALLOWED_ROOTS", str(ROOT / "tests"))
 os.environ.setdefault("API_KEYS", "test-key")
+os.environ.setdefault("WORKER_REGISTRATION_TOKEN", "test-reg-token")
 
 TEST_API_HEADERS = {"X-API-Key": "test-key"}
 
@@ -24,22 +25,28 @@ from app.database import Base as ApiBase
 from app.database import engine as api_engine
 from app.main import app as api_app
 import app.main as api_main
-from database import Base as WorkerBase
-from database import engine as worker_engine
-import scheduler
 import tasks
 import plugins.db_to_s3 as db_to_s3
-from models import BackupRun, Binding, Destination, RunStatus, Source, SourceType
 from plugins.db_to_s3 import _selected_databases, run_database_dump_to_s3
 
 
 @pytest.fixture(autouse=True)
 def reset_db():
     ApiBase.metadata.drop_all(bind=api_engine)
-    WorkerBase.metadata.drop_all(bind=worker_engine)
     ApiBase.metadata.create_all(bind=api_engine)
     yield
     ApiBase.metadata.drop_all(bind=api_engine)
+
+
+def _register_worker(client: TestClient, name: str = "test-worker") -> int:
+    """Register a worker and return its ID."""
+    resp = client.post(
+        "/workers/register",
+        json={"name": name},
+        headers={"X-Worker-Registration-Token": "test-reg-token", "Content-Type": "application/json"},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["worker_id"]
 
 
 class FakeS3Client:
@@ -111,9 +118,6 @@ def test_validation_endpoints_return_structured_results(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
-
-
-def test_scan_postgresql_databases_returns_discovered_list(monkeypatch):
     class FakeCursor:
         def execute(self, query):
             self.query = query
@@ -166,10 +170,11 @@ def test_selected_databases_normalizes_values():
 
 def test_cron_validation_rejects_invalid_expression():
     client = TestClient(api_app, headers=TEST_API_HEADERS)
+    worker_id = _register_worker(client)
 
     src = client.post(
         "/sources",
-        json={"name": "src", "source_type": "s3", "settings": {"bucket": "demo"}},
+        json={"name": "src", "source_type": "s3", "settings": {"bucket": "demo"}, "worker_id": worker_id},
     ).json()
     dst = client.post(
         "/destinations",
@@ -344,195 +349,92 @@ def test_compressed_copy_skips_head_when_destination_is_missing(monkeypatch, tmp
     }
 
 
-def test_scheduler_should_enqueue_when_cron_due():
-    binding = SimpleNamespace(id=1, schedule_cron="* * * * *", last_scheduled_at=None)
-    now = scheduler._utcnow()
-    assert scheduler._should_enqueue(binding, now, 60) is True
+def test_worker_registration_and_token():
+    client = TestClient(api_app, headers=TEST_API_HEADERS)
+    worker_id = _register_worker(client, "alpha")
+    assert worker_id > 0
 
-
-def test_cancel_run_uses_persisted_queue_job_id_for_retry_messages(monkeypatch):
-    class FakeJob:
-        def get_status(self, refresh=True):
-            return "queued"
-
-        def cancel(self):
-            self.cancelled = True
-
-    monkeypatch.setattr(api_main.Job, "fetch", lambda job_id, connection=None: FakeJob())
-
-    run = BackupRun(
-        binding_id=1,
-        status=RunStatus.queued,
-        message="Retrying (2 retries left): Task exceeded maximum timeout value (21600 seconds)",
-        queue_job_id="job-123",
+    # Re-register same name should rotate token (idempotent)
+    resp2 = client.post(
+        "/workers/register",
+        json={"name": "alpha"},
+        headers={"X-Worker-Registration-Token": "test-reg-token"},
     )
-    q = SimpleNamespace(connection=object())
-    db = SimpleNamespace(commit=lambda: None)
-
-    ok, reason = api_main._cancel_run(run, q, db)
-
-    assert ok is True
-    assert reason == "cancelled"
-    assert run.status == RunStatus.cancelled
+    assert resp2.status_code == 200
+    assert resp2.json()["worker_id"] == worker_id
 
 
-def test_cancel_run_marks_running_job_cancelled_immediately(monkeypatch):
-    class FakeJob:
-        def get_status(self, refresh=True):
-            return "busy"
-
-    def fake_send_stop_job_command(connection, job_id):
-        assert job_id == "job-running"
-
-    monkeypatch.setattr(api_main.Job, "fetch", lambda job_id, connection=None: FakeJob())
-    monkeypatch.setattr(api_main, "send_stop_job_command", fake_send_stop_job_command)
-
-    run = BackupRun(
-        binding_id=1,
-        status=RunStatus.running,
-        message="Running s3 backup (attempt 1)",
-        queue_job_id="job-running",
+def test_worker_registration_wrong_token():
+    client = TestClient(api_app, headers=TEST_API_HEADERS)
+    resp = client.post(
+        "/workers/register",
+        json={"name": "bad-token-worker"},
+        headers={"X-Worker-Registration-Token": "wrong"},
     )
-    q = SimpleNamespace(connection=object())
-    db = SimpleNamespace(commit=lambda: None)
-
-    ok, reason = api_main._cancel_run(run, q, db)
-
-    assert ok is True
-    assert reason == "cancellation requested"
-    assert run.status == RunStatus.cancelled
+    assert resp.status_code == 401
 
 
-def test_cancel_run_marks_stale_job_missing_queue_id(monkeypatch):
-    run = BackupRun(binding_id=1, status=RunStatus.queued, message="Retrying (2 retries left): error", queue_job_id="")
-    q = SimpleNamespace(connection=object())
-    db = SimpleNamespace(commit=lambda: None)
+def test_cancel_queued_run_sets_cancelled_immediately():
+    client = TestClient(api_app, headers=TEST_API_HEADERS)
+    worker_id = _register_worker(client)
 
-    ok, reason = api_main._cancel_run(run, q, db)
+    src = client.post("/sources", json={"name": "src", "source_type": "s3", "settings": {"bucket": "b"}, "worker_id": worker_id}).json()
+    dst = client.post("/destinations", json={"name": "dst", "provider": "s3-compatible", "endpoint": "", "bucket": "b", "region": "us-east-1", "secret_ref": ""}).json()
+    binding = client.post("/bindings", json={"source_id": src["id"], "destination_id": dst["id"], "schedule_cron": "0 2 * * *", "policy": {}, "is_active": True}).json()
 
-    assert ok is False
-    assert reason == "stale queued job"
-    assert run.status == RunStatus.failed
+    run = client.post(f"/runs/trigger/{binding['id']}").json()
+    assert run["status"] == "queued"
 
-    run = BackupRun(binding_id=1, status=RunStatus.running, message="Running s3 backup (attempt 1)", queue_job_id="")
-    ok, reason = api_main._cancel_run(run, q, db)
+    cancel_resp = client.post(f"/runs/{run['id']}/cancel")
+    assert cancel_resp.status_code == 200
+    assert cancel_resp.json()["result"] == "cancelled"
 
-    assert ok is True
-    assert reason == "cancelled"
-    assert run.status == RunStatus.cancelled
-
-
-def test_run_backup_job_updates_status(monkeypatch):
-    monkeypatch.setattr(tasks, "run_s3_to_s3", lambda source, destination, binding: {"copied_objects": 1, "skipped_objects": 0, "transferred_bytes": 7})
-
-    db = tasks.SessionLocal()
-    try:
-        source = Source(name="src", source_type=SourceType.s3, settings={"bucket": "demo"}, is_active=True)
-        destination = Destination(name="dest", provider="s3-compatible", endpoint="", bucket="dest", region="us-east-1", secret_ref="", is_active=True)
-        db.add(source)
-        db.add(destination)
-        db.commit()
-        binding = Binding(source_id=source.id, destination_id=destination.id, schedule_cron="0 2 * * *", policy={}, is_active=True)
-        db.add(binding)
-        db.commit()
-
-        run = BackupRun(binding_id=binding.id, status=RunStatus.queued, message="Queued")
-        db.add(run)
-        db.commit()
-        db.refresh(run)
-
-        tasks.run_backup_job(run.id)
-    finally:
-        db.close()
-
-    db = tasks.SessionLocal()
-    try:
-        refreshed = db.get(BackupRun, run.id)
-        assert refreshed is not None
-        assert refreshed.status == RunStatus.success
-        assert refreshed.bytes_transferred == 7
-        assert "Completed" in refreshed.message
-    finally:
-        db.close()
+    refreshed = client.get(f"/runs/{run['id']}").json()
+    assert refreshed["status"] == "cancelled"
 
 
-def test_scheduler_marks_stale_queued_jobs_failed(monkeypatch):
-    class FakeJob:
-        def get_status(self, refresh=True):
-            return "missing"
+def test_source_requires_valid_worker():
+    client = TestClient(api_app, headers=TEST_API_HEADERS)
 
-    monkeypatch.setattr(scheduler, "SessionLocal", lambda: FakeSession())
-    monkeypatch.setattr(scheduler.Redis, "from_url", lambda url: object())
-    monkeypatch.setattr(scheduler.Job, "fetch", lambda job_id, connection=None: FakeJob())
+    resp = client.post("/sources", json={"name": "src", "source_type": "s3", "settings": {"bucket": "b"}, "worker_id": 9999})
+    assert resp.status_code == 404
 
-    class FakeSession:
-        def __init__(self):
-            self.runs = []
-
-        def query(self, model):
-            return self
-
-        def filter(self, *_args, **_kwargs):
-            return self
-
-        def all(self):
-            return [
-                BackupRun(
-                    binding_id=1,
-                    status=RunStatus.queued,
-                    started_at=scheduler._utcnow() - __import__("datetime").timedelta(days=2),
-                    message="Retrying (2 retries left): Task exceeded maximum timeout value (21600 seconds)",
-                    queue_job_id="job-abc",
-                )
-            ]
-
-        def commit(self):
-            return None
-
-        def close(self):
-            return None
-
-    marked = scheduler.reap_stale_running_runs()
-    assert marked == 1
+    resp2 = client.post("/sources", json={"name": "src-no-worker", "source_type": "s3", "settings": {"bucket": "b"}})
+    assert resp2.status_code == 400
 
 
-def test_scheduler_reconciles_orphaned_running_jobs_at_startup(monkeypatch):
-    class FakeJob:
-        def get_status(self, refresh=True):
-            return "missing"
+def test_worker_claim_only_gets_own_sources():
+    client = TestClient(api_app, headers=TEST_API_HEADERS)
+    w1_id = _register_worker(client, "worker-1")
+    w2_id = _register_worker(client, "worker-2")
 
-    class FakeSession:
-        def __init__(self):
-            self.runs = []
+    # Rotate tokens to get fresh ones
+    w1_token = client.post("/workers/register", json={"name": "worker-1"}, headers={"X-Worker-Registration-Token": "test-reg-token"}).json()["token"]
+    w2_token = client.post("/workers/register", json={"name": "worker-2"}, headers={"X-Worker-Registration-Token": "test-reg-token"}).json()["token"]
 
-        def query(self, model):
-            return self
+    # Create source pinned to w2
+    src = client.post("/sources", json={"name": "src-w2", "source_type": "s3", "settings": {"bucket": "b"}, "worker_id": w2_id}).json()
+    dst = client.post("/destinations", json={"name": "dst", "provider": "s3-compatible", "endpoint": "", "bucket": "b", "region": "us-east-1", "secret_ref": ""}).json()
+    binding = client.post("/bindings", json={"source_id": src["id"], "destination_id": dst["id"], "schedule_cron": "0 2 * * *", "policy": {}, "is_active": True}).json()
 
-        def filter(self, *_args, **_kwargs):
-            return self
+    # Trigger a run
+    client.post(f"/runs/trigger/{binding['id']}")
 
-        def all(self):
-            return [
-                BackupRun(
-                    binding_id=1,
-                    status=RunStatus.running,
-                    started_at=scheduler._utcnow(),
-                    message="Running s3 backup (attempt 1)",
-                    queue_job_id="job-abc",
-                )
-            ]
+    # Use separate clients (no default API-Key) so worker bearer token is the only auth
+    worker_client = TestClient(api_app)
+    w1_headers = {"Authorization": f"Bearer {w1_token}"}
+    w2_headers = {"Authorization": f"Bearer {w2_token}"}
 
-        def commit(self):
-            return None
+    # Worker 1 claims nothing (source is pinned to w2)
+    claim1 = worker_client.post("/workers/runs/claim", headers=w1_headers)
+    assert claim1.status_code == 204
 
-        def close(self):
-            return None
-
-    monkeypatch.setattr(scheduler, "SessionLocal", lambda: FakeSession())
-    monkeypatch.setattr(scheduler.Job, "fetch", lambda job_id, connection=None: FakeJob())
-
-    marked = scheduler.reconcile_orphaned_runs(redis_conn=object())
-    assert marked == 1
+    # Worker 2 claims the run
+    claim2 = worker_client.post("/workers/runs/claim", headers=w2_headers)
+    assert claim2.status_code == 200
+    ctx = claim2.json()
+    assert ctx["source_type"] == "s3"
+    assert "bucket" in ctx["destination"]
 
 
 def test_database_dump_plugin_excludes_system_schemas_from_selection():

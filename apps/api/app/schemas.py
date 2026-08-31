@@ -76,6 +76,7 @@ class SourceCreate(BaseModel):
     source_type: SourceType
     settings: dict = {}
     is_active: bool = True
+    worker_id: int | None = None
 
 
 class SourceDatabaseScanRequest(BaseModel):
@@ -120,6 +121,7 @@ class RunRead(BaseModel):
     attempts: int = 0
     max_attempts: int = 0
     artifact_ref: str = ""
+    worker_id: int | None = None
 
     class Config:
         from_attributes = True
@@ -135,3 +137,65 @@ class RunStatusHistoryRead(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class WorkerRead(BaseModel):
+    id: int
+    name: str
+    is_active: bool
+    registered_at: datetime
+    last_heartbeat_at: datetime | None = None
+    online: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class WorkerUpdate(BaseModel):
+    name: str | None = None
+    is_active: bool | None = None
+
+
+class WorkerRegisterRequest(BaseModel):
+    name: str
+
+
+class WorkerRegisterResponse(BaseModel):
+    worker_id: int
+    token: str
+    name: str
+
+
+class DestinationInfo(BaseModel):
+    endpoint: str
+    bucket: str
+    region: str
+    secret_ref: str
+    encryption: dict = {}
+
+
+class BindingInfo(BaseModel):
+    id: int
+    policy: dict = {}
+
+
+class ClaimedRunContext(BaseModel):
+    run_id: int
+    binding_id: int
+    source_type: str
+    source_settings: dict
+    destination: DestinationInfo
+    binding: BindingInfo
+
+
+class RunStatusUpdate(BaseModel):
+    status: RunStatus
+    message: str = ""
+    bytes_transferred: int = 0
+    artifact_ref: str = ""
+    retryable: bool = False
+
+
+class RunStatusUpdateResponse(BaseModel):
+    ok: bool
+    cancel_requested: bool = False

@@ -7,6 +7,7 @@ let editingDestinationId = null;
 let editingBindingPolicyBase = {};
 let lastSources = [];
 let lastDestinations = [];
+let lastWorkers = [];
 const FRONTEND_BUILD_REF = "__BUILD_REF__";
 const BINDING_PRESETS = {
   safe: {
@@ -623,6 +624,7 @@ function getSourcePayloadFromForm() {
     source_type: sourceType,
     settings,
     is_active: String(f.get("is_active") || "true").toLowerCase() !== "false",
+    worker_id: Number(f.get("worker_id") || 0) || null,
   };
 }
 
@@ -708,6 +710,8 @@ function resetSourceEditState() {
   form.querySelector("[name='is_active']").value = "true";
   form.querySelector("[name='source_type']").value = "s3";
   form.querySelector("[name='s3_region']").value = "us-east-1";
+  const workerSel = form.querySelector("[name='worker_id']");
+  if (workerSel) workerSel.value = "";
   clearDatabaseScanOptions();
   toggleSourceSettingsVisibility();
   document.getElementById("source-submit-btn").textContent = "Save Source";
@@ -749,6 +753,8 @@ function startSourceEdit(source) {
     clearDatabaseScanOptions();
   }
   form.querySelector("[name='is_active']").value = String(Boolean(source.is_active));
+  const workerSel = form.querySelector("[name='worker_id']");
+  if (workerSel && source.worker_id) workerSel.value = String(source.worker_id);
   toggleSourceSettingsVisibility();
   document.getElementById("source-submit-btn").textContent = "Save Source";
   setDrawerTitle("source-drawer-title", `Edit Source: ${source.name}`);
@@ -859,17 +865,23 @@ function showConfigView(panelId) {
 
 function renderSourcesTable(sources) {
   const body = document.getElementById("sources-body");
+  const workerById = new Map(lastWorkers.map((w) => [w.id, w]));
   body.innerHTML = "";
   if (!sources.length) {
-    body.innerHTML = `<tr class="table-empty-row"><td colspan="5">No sources yet — use <strong>New Source</strong> to add one.</td></tr>`;
+    body.innerHTML = `<tr class="table-empty-row"><td colspan="6">No sources yet — use <strong>New Source</strong> to add one.</td></tr>`;
     return;
   }
   for (const s of sources) {
+    const worker = s.worker_id ? workerById.get(s.worker_id) : null;
+    const workerCell = worker
+      ? `<span class="badge ${worker.online ? 'bg-success' : 'bg-secondary'}">${escapeHtml(worker.name)}</span>`
+      : `<span class="badge bg-warning text-dark">unassigned</span>`;
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${s.id}</td>
       <td class="fw-medium">${escapeHtml(s.name)}</td>
       <td>${escapeHtml(s.source_type)}</td>
+      <td>${workerCell}</td>
       <td>${s.is_active ? '<span class="status-badge status-success">active</span>' : '<span class="status-badge status-queued">inactive</span>'}</td>
       <td class="text-end"><div class="table-actions">
         <button class="btn btn-outline-secondary test-source-row" data-source-id="${s.id}" type="button" title="Test connection"><i class="bi bi-plug"></i></button>
@@ -1081,21 +1093,91 @@ function renderBindingsTable(bindings) {
   });
 }
 
+function renderWorkersTable(workers) {
+  const body = document.getElementById("workers-body");
+  if (!body) return;
+  body.innerHTML = "";
+  if (!workers.length) {
+    body.innerHTML = `<tr class="table-empty-row"><td colspan="6">No workers registered yet. Start a worker container with <code>WORKER_REGISTRATION_TOKEN</code> set.</td></tr>`;
+    return;
+  }
+  for (const w of workers) {
+    const statusBadge = w.online
+      ? `<span class="status-badge status-success">online</span>`
+      : `<span class="status-badge status-failed">offline</span>`;
+    const lastHb = w.last_heartbeat_at ? timeAgo(w.last_heartbeat_at) : "never";
+    const registeredAt = w.registered_at ? timeAgo(w.registered_at) : "—";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${w.id}</td>
+      <td class="fw-medium">${escapeHtml(w.name)}</td>
+      <td>${statusBadge}</td>
+      <td>${escapeHtml(lastHb)}</td>
+      <td>${escapeHtml(registeredAt)}</td>
+      <td class="text-end"><div class="table-actions">
+        <button class="btn btn-outline-danger deactivate-worker-row" data-worker-id="${w.id}" data-active="${w.is_active}" type="button" title="${w.is_active ? 'Deactivate' : 'Activate'}">
+          <i class="bi bi-${w.is_active ? 'pause' : 'play'}"></i>
+        </button>
+      </div></td>
+    `;
+    body.appendChild(tr);
+  }
+
+  body.querySelectorAll(".deactivate-worker-row").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.workerId);
+      const active = btn.dataset.active === "true";
+      try {
+        await api(`/workers/${id}`, {
+          method: "PUT",
+          body: JSON.stringify({ is_active: !active }),
+        });
+        await refreshWorkers();
+        setFlash(`Worker ${id} ${active ? "deactivated" : "activated"}`);
+      } catch (err) {
+        setFlash(`Worker update failed: ${err.message}`, "danger");
+      }
+    });
+  });
+}
+
+async function refreshWorkers() {
+  const workers = await api("/workers");
+  lastWorkers = workers;
+  renderWorkersTable(workers);
+  // Re-populate source worker selector if it's visible
+  const workerSel = document.getElementById("source-worker-input");
+  if (workerSel) {
+    const currentVal = workerSel.value;
+    workerSel.innerHTML = `<option value="">— select a worker —</option>`;
+    for (const w of workers.filter((w) => w.is_active)) {
+      const opt = document.createElement("option");
+      opt.value = w.id;
+      opt.textContent = `${w.name}${w.online ? " ●" : " ○"}`;
+      workerSel.appendChild(opt);
+    }
+    if (currentVal) workerSel.value = currentVal;
+  }
+}
+
 async function refreshSelectors() {
   const sourcesBody = document.getElementById("sources-body");
   const destinationsBody = document.getElementById("destinations-body");
-  sourcesBody.innerHTML = `<tr class="table-loading-row"><td colspan="5">Loading sources…</td></tr>`;
+  sourcesBody.innerHTML = `<tr class="table-loading-row"><td colspan="6">Loading sources…</td></tr>`;
   destinationsBody.innerHTML = `<tr class="table-loading-row"><td colspan="5">Loading destinations…</td></tr>`;
 
-  const [sources, destinations] = await Promise.all([
+  const [sources, destinations, workers] = await Promise.all([
     api("/sources"),
     api("/destinations"),
+    api("/workers"),
   ]);
   lastSources = sources;
   lastDestinations = destinations;
+  lastWorkers = workers;
 
   const sourceSel = document.getElementById("source-select");
   const destSel = document.getElementById("destination-select");
+  const workerSel = document.getElementById("source-worker-input");
 
   sourceSel.innerHTML = "";
   destSel.innerHTML = "";
@@ -1112,6 +1194,18 @@ async function refreshSelectors() {
     opt.value = d.id;
     opt.textContent = `${d.id} - ${d.name} (${d.provider})`;
     destSel.appendChild(opt);
+  }
+
+  if (workerSel) {
+    const currentVal = workerSel.value;
+    workerSel.innerHTML = `<option value="">— select a worker —</option>`;
+    for (const w of workers.filter((w) => w.is_active)) {
+      const opt = document.createElement("option");
+      opt.value = w.id;
+      opt.textContent = `${w.name}${w.online ? " ●" : " ○"}`;
+      workerSel.appendChild(opt);
+    }
+    if (currentVal) workerSel.value = currentVal;
   }
 
   renderSourcesTable(sources);
@@ -1330,6 +1424,9 @@ async function boot() {
   document.querySelectorAll("#config-tab-list .nav-link").forEach((btn) => {
     btn.addEventListener("click", () => {
       showConfigView(btn.dataset.configView);
+      if (btn.dataset.configView === "workers-panel") {
+        refreshWorkers().catch((err) => setFlash(`Workers load failed: ${err.message}`, "danger"));
+      }
     });
   });
 

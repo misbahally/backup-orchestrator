@@ -1,18 +1,14 @@
 [tool.poetry]
 name = "backup-worker"
 version = "0.1.0"
-description = "RQ worker for the backup orchestrator"
+description = "HTTP-polling worker for the backup orchestrator"
 authors = ["Misbah Ally <2109168+misbahally@users.noreply.github.com>"]
 package-mode = false
 
 [tool.poetry.dependencies]
 python = ">=3.13,<3.14"
-sqlalchemy = "2.0.35"
-psycopg2-binary = "2.9.12"
-redis = "5.0.8"
-rq = "1.16.2"
+httpx = "0.28.1"
 boto3 = "1.35.30"
 anyio = "4.7.0"
-croniter = "2.0.7"
 prometheus-client = "0.21.1"
 orchestrator-core = { path = "../../libs/orchestrator_core" }

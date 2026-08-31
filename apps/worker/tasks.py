@@ -1,11 +1,10 @@
-from datetime import datetime, timezone
+import logging
 import os
 import time
+from typing import TYPE_CHECKING
 
 from botocore.exceptions import ClientError
-from rq import get_current_job
 
-from database import SessionLocal
 from metrics import (
     BACKUP_FAILURES_TOTAL,
     BACKUP_LAST_SUCCESS_TIMESTAMP,
@@ -13,15 +12,14 @@ from metrics import (
     BACKUP_OPERATIONS_TOTAL,
     BACKUP_UPLOADED_BYTES_TOTAL,
 )
-from models import BackupRun, BackupRunStatusHistory, Binding, Destination, RunStatus, Source, SourceType
+from models import Binding, Destination, Source, SourceType
 from plugins import run_database_dump_to_s3, run_ebs_snapshot, run_file_to_s3, run_rds_snapshot, run_s3_to_s3
 
+if TYPE_CHECKING:
+    from api_client import WorkerApiClient
 
+logger = logging.getLogger("backup-worker")
 TEMP_DISABLED_SOURCE_TYPES = {SourceType.ebs, SourceType.rds}
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -36,64 +34,40 @@ def _is_retryable(exc: Exception) -> bool:
     return True
 
 
-def _record_status_change(db, run: BackupRun, new_status: RunStatus, reason: str = "") -> None:
-    """Record a status change in the backup_run_status_history table."""
-    history_entry = BackupRunStatusHistory(
-        backup_run_id=run.id,
-        old_status=run.status,
-        new_status=new_status,
-        reason=reason,
-    )
-    db.add(history_entry)
-
-
-def run_backup_job(run_id: int) -> None:
-    db = SessionLocal()
+def run_backup_job(context: dict, client: "WorkerApiClient") -> None:
+    """Execute a claimed backup run described by the claim-response context dict."""
+    run_id: int = context["run_id"]
+    source_type_name: str = context.get("source_type", "unknown")
+    binding_id = str(context.get("binding_id", ""))
     started = time.perf_counter()
-    source_type_name = "unknown"
-    binding_label = ""
+
     try:
-        run = db.get(BackupRun, run_id)
-        if run is None:
-            return
+        source = Source(
+            source_type=SourceType(source_type_name),
+            settings=context.get("source_settings") or {},
+        )
+        dest_data = context.get("destination") or {}
+        destination = Destination(
+            endpoint=dest_data.get("endpoint", ""),
+            bucket=dest_data.get("bucket", ""),
+            region=dest_data.get("region", "us-east-1"),
+            secret_ref=dest_data.get("secret_ref", ""),
+            encryption=dest_data.get("encryption") or {},
+        )
+        binding_data = context.get("binding") or {}
+        binding = Binding(
+            id=int(binding_data.get("id") or binding_id or 0),
+            policy=binding_data.get("policy") or {},
+        )
 
-        binding = db.get(Binding, run.binding_id)
-        if binding is None:
-            raise ValueError(f"Binding {run.binding_id} not found")
-        binding_label = str(binding.id)
-
-        source = db.get(Source, binding.source_id)
-        if source is None:
-            raise ValueError(f"Source {binding.source_id} not found")
-        source_type_name = source.source_type.value
-
-        destination = db.get(Destination, binding.destination_id)
-        if destination is None:
-            raise ValueError(f"Destination {binding.destination_id} not found")
-
-        if not source.is_active:
-            raise ValueError(f"Source {source.id} is not active")
         if source.source_type in TEMP_DISABLED_SOURCE_TYPES:
             raise ValueError(f"Source type '{source.source_type.value}' is temporarily disabled")
-        if not destination.is_active:
-            raise ValueError(f"Destination {destination.id} is not active")
-        if not binding.is_active:
-            raise ValueError(f"Binding {binding.id} is not active")
 
-        if run.status == RunStatus.cancelled:
-            run.finished_at = _utcnow()
-            run.message = "Cancelled before execution"
-            db.commit()
+        resp = client.report_status(run_id, "running", f"Starting {source_type_name} backup")
+        if resp.get("cancel_requested"):
+            client.report_status(run_id, "cancelled", "Cancelled before execution")
+            BACKUP_OPERATIONS_TOTAL.labels(source_type=source_type_name, status="cancelled").inc()
             return
-
-        _record_status_change(db, run, RunStatus.running, f"Starting execution (attempt {int(run.attempts or 0) + 1})")
-        run.status = RunStatus.running
-        run.attempts = int(run.attempts or 0) + 1
-        current_job = get_current_job()
-        if current_job is not None and getattr(current_job, "id", None):
-            run.queue_job_id = str(current_job.id)
-        run.message = f"Running {source.source_type.value} backup (attempt {run.attempts})"
-        db.commit()
 
         transferred = 0
         copied = 0
@@ -111,7 +85,10 @@ def run_backup_job(run_id: int) -> None:
             copied = int(summary.get("copied_objects", 0))
             skipped = int(summary.get("skipped_objects", 0))
         elif source.source_type == SourceType.file:
-            summary = run_file_to_s3(source, destination, binding, os.environ.get("FILE_SOURCE_ALLOWED_ROOTS", "/data:/mnt/backups"))
+            summary = run_file_to_s3(
+                source, destination, binding,
+                os.environ.get("FILE_SOURCE_ALLOWED_ROOTS", "/data:/mnt/backups"),
+            )
             transferred = int(summary.get("transferred_bytes", 0))
             copied = int(summary.get("copied_objects", 0))
             skipped = int(summary.get("skipped_objects", 0))
@@ -124,47 +101,34 @@ def run_backup_job(run_id: int) -> None:
         else:
             raise NotImplementedError(f"Source type '{source.source_type.value}' is not implemented yet")
 
-        if run.status == RunStatus.cancelled:
-            run.finished_at = _utcnow()
-            run.message = "Cancelled before execution"
-            db.commit()
-            return
-
-        _record_status_change(db, run, RunStatus.success, "Backup completed successfully")
-        run.status = RunStatus.success
-        run.bytes_transferred = transferred
-        run.artifact_ref = artifact_ref
-        run.finished_at = _utcnow()
-        run.message = f"Completed: copied={copied}, skipped={skipped}" if not artifact_ref else f"Completed snapshot: {artifact_ref}"
-        db.commit()
+        finish_message = (
+            f"Completed snapshot: {artifact_ref}" if artifact_ref
+            else f"Completed: copied={copied}, skipped={skipped}"
+        )
+        client.report_status(
+            run_id, "success",
+            message=finish_message,
+            bytes_transferred=transferred,
+            artifact_ref=artifact_ref,
+        )
 
         BACKUP_OPERATIONS_TOTAL.labels(source_type=source_type_name, status="success").inc()
-        BACKUP_UPLOADED_BYTES_TOTAL.labels(binding=binding_label).inc(transferred)
-        BACKUP_LAST_SUCCESS_TIMESTAMP.labels(binding=binding_label).set(run.finished_at.timestamp())
+        BACKUP_UPLOADED_BYTES_TOTAL.labels(binding=binding_id).inc(transferred)
+        BACKUP_LAST_SUCCESS_TIMESTAMP.labels(binding=binding_id).set(time.time())
+
     except Exception as exc:
-        run = db.get(BackupRun, run_id)
-        job = get_current_job()
-        retries_left = int(getattr(job, "retries_left", 0) or 0)
         retryable = _is_retryable(exc)
-
-        if run is not None:
-            if job is not None and getattr(job, "id", None):
-                run.queue_job_id = str(job.id)
-            if retryable and retries_left > 0:
-                _record_status_change(db, run, RunStatus.queued, f"Retrying after error: {exc} ({retries_left} retries left)")
-                run.status = RunStatus.queued
-                run.message = f"Retrying ({retries_left} retries left): {exc}"
-                db.commit()
-            else:
-                _record_status_change(db, run, RunStatus.failed, f"Backup failed: {exc}")
-                run.status = RunStatus.failed
-                run.finished_at = _utcnow()
-                run.message = f"Failed: {exc}"
-                db.commit()
-
+        client.report_status(
+            run_id, "failed",
+            message=f"Failed: {exc}",
+            retryable=retryable,
+        )
         BACKUP_OPERATIONS_TOTAL.labels(source_type=source_type_name, status="failed").inc()
         BACKUP_FAILURES_TOTAL.labels(source_type=source_type_name, error_class=exc.__class__.__name__).inc()
-        raise
+        logger.exception("Backup run %s failed", run_id)
     finally:
         BACKUP_OPERATION_DURATION_SECONDS.labels(source_type=source_type_name).observe(time.perf_counter() - started)
-        db.close()
+
+
+
+

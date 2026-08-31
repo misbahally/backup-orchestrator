@@ -211,6 +211,9 @@
               <li class="nav-item">
                 <button class="nav-link" type="button" data-config-view="bindings-panel">Bindings</button>
               </li>
+              <li class="nav-item">
+                <button class="nav-link" type="button" data-config-view="workers-panel">Workers</button>
+              </li>
             </ul>
 
             <div id="sources-panel" class="config-panel">
@@ -227,6 +230,7 @@
                       <th>ID</th>
                       <th>Name</th>
                       <th>Type</th>
+                      <th>Worker</th>
                       <th>Status</th>
                       <th class="text-end">Actions</th>
                     </tr>
@@ -278,6 +282,27 @@
                     </tr>
                   </thead>
                   <tbody id="bindings-body"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div id="workers-panel" class="config-panel d-none">
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h3 class="h5 mb-0">Registered Workers</h3>
+              </div>
+              <div class="table-responsive">
+                <table class="table align-middle">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Name</th>
+                      <th>Status</th>
+                      <th>Last Heartbeat</th>
+                      <th>Registered</th>
+                      <th class="text-end">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="workers-body"></tbody>
                 </table>
               </div>
             </div>
@@ -352,6 +377,13 @@
               <option value="postgresql">postgresql</option>
               <option value="file">file</option>
             </select>
+          </div>
+          <div>
+            <label class="form-label small mb-1" for="source-worker-input">Worker <span class="text-danger">*</span></label>
+            <select class="form-select" id="source-worker-input" name="worker_id" required>
+              <option value="">— select a worker —</option>
+            </select>
+            <div class="form-text">The worker that will execute backup jobs for this source.</div>
           </div>
           <div id="s3-settings-panel" class="border rounded p-3 bg-body-tertiary d-none">
             <div class="fw-semibold small mb-2">S3 connection details</div>
