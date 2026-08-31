@@ -1,13 +1,13 @@
 # Backup Control Plane
 
 A service-oriented backup control plane for defining backup sources, destinations, and
-scheduled bindings, then executing and monitoring backup runs through a job queue.
+scheduled bindings, then executing and monitoring backup runs through registered workers.
 
-- `apps/api`: FastAPI control plane API (DB-backed config and run orchestration)
-- `apps/worker`: RQ worker and cron-aware scheduler that execute queued backup runs
-- `apps/web`: static frontend that visualizes source -> destination mappings and run status
+- `apps/api`: FastAPI control plane (DB-backed config, scheduler, run orchestration)
+- `apps/worker`: lightweight HTTP-polling worker that claims and executes backup runs
+- `apps/web`: static frontend for topology visualization, configuration, and run monitoring
 - `libs/orchestrator_core`: shared SQLAlchemy models, database helpers, and secret
-  resolution used by both `apps/api` and `apps/worker`
+  resolution used by `apps/api`
 
 Each app has its own Poetry environment:
 - `apps/api/pyproject.toml`
@@ -16,13 +16,11 @@ Each app has its own Poetry environment:
 ## Services
 
 - `postgres`: persistent metadata store
-- `redis`: job queue broker
 - `minio`: local S3-compatible object storage for testing
-- `migrate`: one-shot service that runs Alembic migrations before api/worker/scheduler start
-- `api`: REST API for configuration and run control
-- `worker`: async execution worker
-- `scheduler`: cron-aware loop that enqueues runs for active bindings
-- `web`: static web UI for topology and config visibility
+- `migrate`: one-shot service that runs Alembic migrations before the API starts
+- `api`: REST API for configuration, scheduling, and run control
+- `worker`: backup execution worker (one or more instances)
+- `web`: static web UI for topology and configuration
 
 ## Quick Start
 
@@ -32,7 +30,14 @@ Each app has its own Poetry environment:
 cp .env.example .env
 ```
 
-2. (Optional, for local development outside Docker) install each app with Poetry using
+2. Set a shared registration token so workers can identify themselves to the API:
+
+```bash
+# .env
+WORKER_REGISTRATION_TOKEN=<some-random-secret>
+```
+
+3. (Optional, for local development outside Docker) install each app with Poetry using
    Python 3.13:
 
 ```bash
@@ -40,13 +45,13 @@ cd apps/api && poetry env use 3.13 && poetry install --no-root
 cd ../worker && poetry env use 3.13 && poetry install --no-root
 ```
 
-3. Start all services (builds images, runs migrations, then starts api/worker/scheduler/web):
+4. Start all services (builds images, runs migrations, then starts api/worker/web):
 
 ```bash
 docker compose up --build
 ```
 
-4. Open:
+5. Open:
 
 - Web UI: `http://localhost:8080`
 - API docs: `http://localhost:8000/docs`
@@ -92,13 +97,18 @@ export AWS_DEFAULT_REGION=us-east-1
 ## Features
 
 - DB-backed source/destination/binding configuration with Alembic-managed schema
-- Job queue integration (RQ/Redis) with retries and full run state transitions
-- Cron-aware scheduler that enqueues due bindings and guards against duplicate runs
+- Multi-worker support: workers self-register via a shared token, then long-poll the API
+  to claim queued runs; run dispatch uses `SELECT … FOR UPDATE SKIP LOCKED` for isolation
+- Cron-aware scheduler embedded in the API (asyncio background task) with duplicate-run
+  guard and automatic reaper for runs whose worker heartbeat goes stale
+- Workers are fully decoupled — they communicate only with the API over HTTP; no direct
+  database or Redis access
+- Each source is pinned to a specific worker; choose the worker in the Configuration UI
 - Session + API key authentication for the API and web UI
-- Prometheus metrics endpoints for API/worker/scheduler
-- Topology visualization in the web UI
+- Prometheus metrics endpoints for API and workers
+- Topology visualization and Workers management tab in the web UI
 - Shared models, database access, and secret resolution via `libs/orchestrator_core`
-- Structured validation diagnostics and run detail inspection
+- Structured validation diagnostics and run detail inspection with status history timeline
 - Source plugins for S3 copy, MySQL/PostgreSQL logical dump, and filesystem copy
   (EBS snapshots and RDS snapshots are implemented but temporarily disabled — see
   [docs/api-usage.md](docs/api-usage.md))
