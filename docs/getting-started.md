@@ -20,7 +20,7 @@ If you are using the defaults in the compose file, the stack will start with:
 
 - PostgreSQL on port 5432
 - MinIO on ports 9000 and 9001
-- API on port 8000
+- API on port 8001
 - Web UI on port 8080
 
 Set these important variables in `.env` before startup:
@@ -50,7 +50,7 @@ API is healthy, the `worker` service registers itself and begins polling for run
 After the services are running, open:
 
 - Web UI: http://localhost:8080
-- API docs: http://localhost:8000/docs
+- API docs: http://localhost:8001/docs
 - MinIO Console: http://localhost:9001
 
 ## 4. Test with MinIO

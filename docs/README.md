@@ -35,5 +35,5 @@ run simultaneously; each only claims runs for its own sources.
 ## Quick links
 
 - Web UI: http://localhost:8080
-- API docs: http://localhost:8000/docs
+- API docs: http://localhost:8001/docs
 - MinIO Console: http://localhost:9001

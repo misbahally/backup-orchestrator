@@ -7,13 +7,13 @@ The control plane API is the main interface for configuring and running backups.
 When running locally, the API is available at:
 
 ```text
-http://localhost:8000
+http://localhost:8001
 ```
 
 The interactive Swagger UI is available at:
 
 ```text
-http://localhost:8000/docs
+http://localhost:8001/docs
 ```
 
 If `API_KEYS` is set, include the header below in every request:
@@ -26,11 +26,11 @@ If `API_KEYS` is not set, the API instead requires a signed-in session. Log in a
 returned token as a bearer token on subsequent requests:
 
 ```bash
-curl -X POST http://localhost:8000/auth/login \
+curl -X POST http://localhost:8001/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"admin"}'
 
-curl -H 'Authorization: Bearer <token from login>' http://localhost:8000/topology
+curl -H 'Authorization: Bearer <token from login>' http://localhost:8001/topology
 ```
 
 There is only a single built-in user, `admin`, seeded with the password `admin`. Change it
@@ -40,7 +40,7 @@ web UI).
 ## Health check
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 ```
 
 Example response:
@@ -87,7 +87,7 @@ curl -H 'X-API-Key: dev-key' http://localhost:8000/workers
 ```
 
 ```bash
-curl -X POST http://localhost:8000/sources \
+curl -X POST http://localhost:8001/sources \
   -H 'Content-Type: application/json' \
   -H 'X-API-Key: dev-key' \
   -d '{
@@ -107,7 +107,7 @@ curl -X POST http://localhost:8000/sources \
 ## Create a file source
 
 ```bash
-curl -X POST http://localhost:8000/sources \
+curl -X POST http://localhost:8001/sources \
   -H 'Content-Type: application/json' \
   -H 'X-API-Key: dev-key' \
   -d '{
@@ -128,7 +128,7 @@ curl -X POST http://localhost:8000/sources \
 ## Create a destination
 
 ```bash
-curl -X POST http://localhost:8000/destinations \
+curl -X POST http://localhost:8001/destinations \
   -H 'Content-Type: application/json' \
   -H 'X-API-Key: dev-key' \
   -d '{
@@ -148,7 +148,7 @@ curl -X POST http://localhost:8000/destinations \
 A binding connects a source to a destination and defines the schedule.
 
 ```bash
-curl -X POST http://localhost:8000/bindings \
+curl -X POST http://localhost:8001/bindings \
   -H 'Content-Type: application/json' \
   -H 'X-API-Key: dev-key' \
   -d '{
@@ -165,28 +165,28 @@ curl -X POST http://localhost:8000/bindings \
 You can validate a source, destination, or binding before triggering a run.
 
 ```bash
-curl -H 'X-API-Key: dev-key' http://localhost:8000/validate/source/1
-curl -H 'X-API-Key: dev-key' http://localhost:8000/validate/destination/1
-curl -H 'X-API-Key: dev-key' http://localhost:8000/validate/binding/1
+curl -H 'X-API-Key: dev-key' http://localhost:8001/validate/source/1
+curl -H 'X-API-Key: dev-key' http://localhost:8001/validate/destination/1
+curl -H 'X-API-Key: dev-key' http://localhost:8001/validate/binding/1
 ```
 
 ## Trigger a run
 
 ```bash
-curl -X POST -H 'X-API-Key: dev-key' http://localhost:8000/runs/trigger/1
+curl -X POST -H 'X-API-Key: dev-key' http://localhost:8001/runs/trigger/1
 ```
 
 ## List and inspect runs
 
 ```bash
-curl -H 'X-API-Key: dev-key' http://localhost:8000/runs
-curl -H 'X-API-Key: dev-key' http://localhost:8000/runs/1
+curl -H 'X-API-Key: dev-key' http://localhost:8001/runs
+curl -H 'X-API-Key: dev-key' http://localhost:8001/runs/1
 ```
 
 ## Cancel a run
 
 ```bash
-curl -X POST -H 'X-API-Key: dev-key' http://localhost:8000/runs/1/cancel
+curl -X POST -H 'X-API-Key: dev-key' http://localhost:8001/runs/1/cancel
 ```
 
 ## Topology view
@@ -194,12 +194,12 @@ curl -X POST -H 'X-API-Key: dev-key' http://localhost:8000/runs/1/cancel
 The topology endpoint returns nodes and edges for the web UI.
 
 ```bash
-curl -H 'X-API-Key: dev-key' http://localhost:8000/topology
+curl -H 'X-API-Key: dev-key' http://localhost:8001/topology
 
 ## Metrics
 
 ```bash
-curl http://localhost:8000/metrics
+curl http://localhost:8001/metrics
 ```
 ```
 
