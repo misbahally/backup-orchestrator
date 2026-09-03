@@ -152,6 +152,10 @@ services:
     build:
       context: .
       dockerfile: ./apps/web/Dockerfile
+    environment:
+      API_UPSTREAM_HOST: ${API_UPSTREAM_HOST:-backup-orchestrator-api}
+      API_UPSTREAM_PORT: ${API_UPSTREAM_PORT:-8001}
+      DNS_RESOLVER: ${DNS_RESOLVER:-127.0.0.11}
     ports:
       - "8080:80"
     depends_on:
