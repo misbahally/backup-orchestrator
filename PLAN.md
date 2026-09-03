@@ -190,7 +190,7 @@ snapshot/recovery-point identifiers rather than uploaded byte counts.
 ### 2.3 API authentication
 
 **Problem:** The API has no authentication whatsoever. Anyone who can reach port
-8000 can read/write all backup configs (which include credential references) and
+8001 can read/write all backup configs (which include credential references) and
 trigger/cancel runs.
 
 **Files:** `apps/api/app/main.py`, new `apps/api/app/auth.py`,
@@ -261,7 +261,7 @@ system has zero metrics and near-zero logging.
    full monitoring stack provisioning stays out of scope.
 
 **Acceptance criteria:**
-- `curl :8000/metrics` (API) and `curl :9090/metrics` (worker) return Prometheus
+- `curl :8001/metrics` (API) and `curl :9090/metrics` (worker) return Prometheus
   text format.
 - Running a backup increments `backup_operations_total` and observes a duration.
 - A failed backup increments `backup_failures_total`.
@@ -490,7 +490,7 @@ sources return "no connection test implemented" (`apps/api/app/main.py` ~L149–
 ### 3.5 Web UI: topology graph, configurable API URL, auto-refresh
 
 **Problem:** The `/topology` endpoint exists but the UI never renders a graph; the
-API base URL is hardcoded to `http://localhost:8000` in `apps/web/app.js`; the runs
+API base URL is hardcoded to `http://localhost:8001` in `apps/web/app.js`; the runs
 list never refreshes on its own.
 
 **Files:** `apps/web/app.js`, `apps/web/index.html`, `apps/web/styles.css`,
@@ -500,7 +500,7 @@ list never refreshes on its own.
 
 1. **Configurable API URL:**
    - Simplest robust option: have nginx proxy `/api/` to the API service
-     (`proxy_pass http://api:8000/;` in `default.conf`) and change `app.js` to use
+     (`proxy_pass http://api:8001/;` in `default.conf`) and change `app.js` to use
      the relative base `"/api"`. This removes the CORS requirement for same-origin
      deployment and the hardcoded host in one move.
    - Keep `API_BASE_URL` as an optional override read from a small

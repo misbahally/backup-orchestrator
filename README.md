@@ -49,7 +49,7 @@ docker compose up --build
 4. Open:
 
 - Web UI: `http://localhost:8080`
-- API docs: `http://localhost:8000/docs`
+- API docs: `http://localhost:8001/docs`
 - MinIO API: `http://localhost:9000`
 - MinIO Console: `http://localhost:9001`
 

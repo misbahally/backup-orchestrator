@@ -24,5 +24,5 @@ The API and worker services each use their own Poetry environment under [apps/ap
 ## Quick links
 
 - Web UI: http://localhost:8080
-- API docs: http://localhost:8000/docs
+- API docs: http://localhost:8001/docs
 - MinIO Console: http://localhost:9001
