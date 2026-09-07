@@ -49,10 +49,38 @@ Example response:
 {"status": "ok"}
 ```
 
+## Worker registration
+
+Workers register automatically on startup using the `WORKER_REGISTRATION_TOKEN` environment
+variable. The token is shared between the API and all worker containers; each worker receives
+a unique per-worker bearer token in return.
+
+To register a worker manually (useful for scripting or debugging):
+
+```bash
+curl -X POST http://localhost:8000/workers/register \
+  -H 'Content-Type: application/json' \
+  -H 'X-Worker-Registration-Token: <WORKER_REGISTRATION_TOKEN>' \
+  -d '{"name": "worker-1"}'
+```
+
+Example response:
+
+```json
+{"worker_id": 1, "token": "<per-worker-token>", "name": "worker-1"}
+```
+
+Re-registering an existing name rotates its token (useful for credential rotation).
+
 ## Create a source
 
 The source represents the backup origin. The current implementation supports `s3`,
 `mysql`, `postgresql`, `file`, `ebs`, and `rds`.
+
+Every source must be assigned to an active worker via `worker_id`. The worker will
+claim and execute any runs triggered for bindings that reference this source.
+
+To find the ID of a registered worker:
 
 ```bash
 curl -X POST http://localhost:8001/sources \
@@ -67,6 +95,7 @@ curl -X POST http://localhost:8001/sources \
       "endpoint": "http://host.docker.internal:9000",
       "secret_ref": "local-minio"
     },
+    "worker_id": 1,
     "is_active": true
   }'
 ```
@@ -87,6 +116,7 @@ curl -X POST http://localhost:8001/sources \
       "follow_symlinks": false,
       "key_prefix": "file/local-files"
     },
+    "worker_id": 1,
     "is_active": true
   }'
 ```
@@ -171,7 +201,32 @@ curl http://localhost:8001/metrics
 
 ## Notes
 
+- Every source must be assigned to a registered, active worker via `worker_id`. The scheduler
+  will skip bindings whose source has no assigned worker, and queued runs will remain in `queued`
+  until that worker connects and claims them.
+- Cancelling a `queued` run sets it to `cancelled` immediately. Cancelling a `running` run
+  sets `cancel_requested`; the worker observes this flag between transfer phases and stops
+  cooperatively.
 - EFS and `other` are no longer valid source types.
 - EBS and RDS are temporarily disabled and return HTTP 503 when used.
 - For EFS workloads, mount EFS into the worker and use a `file` source.
-- Secrets are resolved through the shared secret resolution helper used by both the API and worker.
+- Secrets are resolved through the shared secret resolution helper in `libs/orchestrator_core`.
+
+## Worker endpoints
+
+Workers are managed automatically by the worker container, but you can inspect and
+manage them via the API:
+
+```bash
+# List all workers with online/offline status
+curl -H 'X-API-Key: dev-key' http://localhost:8000/workers
+
+# Deactivate a worker
+curl -X PUT http://localhost:8000/workers/1 \
+  -H 'Content-Type: application/json' \
+  -H 'X-API-Key: dev-key' \
+  -d '{"is_active": false}'
+```
+
+To run a second worker, uncomment the `worker-2` block in `docker-compose.yml` and set
+`WORKER_NAME=worker-2` (or any unique name) in its environment.

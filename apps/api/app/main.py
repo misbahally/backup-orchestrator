@@ -1,4 +1,6 @@
-from datetime import datetime, timezone
+import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 from pathlib import Path
@@ -14,10 +16,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from pymysql import connect as mysql_connect
-from redis import Redis
-from rq import Queue, Retry
-from rq.command import send_stop_job_command
-from rq.job import Job
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import psycopg2
@@ -29,26 +27,37 @@ from .auth import (
     create_session,
     enforce_api_key,
     hash_password,
+    issue_worker_token,
+    require_worker,
     revoke_session,
     verify_password,
 )
 from .config import settings
-from .database import get_db
-from .models import BackupRun, BackupRunStatusHistory, Binding, Destination, RunStatus, Source, SourceType, User
+from .database import SessionLocal, get_db
+from .models import BackupRun, BackupRunStatusHistory, Binding, Destination, RunStatus, Source, SourceType, User, Worker
 from .schemas import (
     BindingCreate,
     BindingRead,
+    BindingInfo,
     ChangePasswordRequest,
+    ClaimedRunContext,
     DestinationCreate,
+    DestinationInfo,
     DestinationRead,
     LoginRequest,
     LoginResponse,
     RunCancelRequest,
     RunRead,
     RunStatusHistoryRead,
+    RunStatusUpdate,
+    RunStatusUpdateResponse,
     SourceCreate,
     SourceDatabaseScanRequest,
     SourceRead,
+    WorkerRead,
+    WorkerRegisterRequest,
+    WorkerRegisterResponse,
+    WorkerUpdate,
 )
 from .secret_resolver import resolve_secret_mapping, resolve_secret_text
 
@@ -59,18 +68,145 @@ REQUEST_COUNT = Counter("api_requests_total", "HTTP requests", ["method", "path"
 REQUEST_LATENCY = Histogram("api_request_duration_seconds", "HTTP request latency", ["method", "path"])
 TEMP_DISABLED_SOURCE_TYPES = {SourceType.ebs, SourceType.rds}
 
+
+# ---------------------------------------------------------------------------
+# Scheduler & reaper background tasks
+# ---------------------------------------------------------------------------
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _scheduler_tick() -> int:
+    db = SessionLocal()
+    interval = settings.scheduler_interval_seconds
+    enqueued = 0
+    try:
+        now = _utcnow()
+        bindings = db.query(Binding).filter(Binding.is_active.is_(True)).all()
+        for binding in bindings:
+            schedule = (binding.schedule_cron or "").strip()
+            if not schedule or not croniter.is_valid(schedule):
+                continue
+            source = db.get(Source, binding.source_id)
+            if source is None or not source.is_active:
+                continue
+            if source.worker_id is None:
+                logger.debug("Skipping binding %s: source has no worker assigned", binding.id)
+                continue
+            worker = db.get(Worker, source.worker_id)
+            if worker is None or not worker.is_active:
+                logger.debug("Skipping binding %s: source worker inactive", binding.id)
+                continue
+            from datetime import timedelta
+            last = binding.last_scheduled_at or (now - timedelta(seconds=interval * 2))
+            next_fire = croniter(schedule, last).get_next(datetime)
+            if next_fire > now:
+                continue
+            existing = (
+                db.query(BackupRun)
+                .filter(BackupRun.binding_id == binding.id)
+                .filter(BackupRun.status.in_([RunStatus.queued, RunStatus.running]))
+                .first()
+            )
+            if existing is not None:
+                continue
+            run = BackupRun(
+                binding_id=binding.id,
+                status=RunStatus.queued,
+                started_at=now,
+                message=f"Scheduled for binding {binding.id}",
+                attempts=0,
+                max_attempts=settings.max_retries + 1,
+            )
+            db.add(run)
+            binding.last_scheduled_at = now
+            db.commit()
+            logger.info("Queued run %s for binding %s", run.id, binding.id)
+            enqueued += 1
+        return enqueued
+    finally:
+        db.close()
+
+
+def _reaper_tick() -> int:
+    from datetime import timedelta
+    db = SessionLocal()
+    marked = 0
+    try:
+        cutoff = _utcnow() - timedelta(seconds=settings.run_heartbeat_timeout_seconds)
+        stale = (
+            db.query(BackupRun)
+            .filter(BackupRun.status == RunStatus.running)
+            .filter(BackupRun.last_heartbeat_at < cutoff)
+            .all()
+        )
+        for run in stale:
+            if int(run.attempts or 0) < int(run.max_attempts or 1):
+                _record_status_change(db, run, RunStatus.queued, "Requeueing after lost heartbeat")
+                run.status = RunStatus.queued
+                run.worker_id = None
+                run.claimed_at = None
+                run.last_heartbeat_at = None
+                run.message = f"Requeueing after lost heartbeat (attempt {run.attempts})"
+            else:
+                _record_status_change(db, run, RunStatus.failed, "Worker heartbeat lost")
+                run.status = RunStatus.failed
+                run.finished_at = _utcnow()
+                run.message = "Failed: worker heartbeat lost"
+            marked += 1
+        if marked:
+            db.commit()
+        return marked
+    finally:
+        db.close()
+
+
+async def _scheduler_loop() -> None:
+    while True:
+        await asyncio.sleep(settings.scheduler_interval_seconds)
+        try:
+            n = await asyncio.to_thread(_scheduler_tick)
+            if n:
+                logger.info("Scheduler enqueued %s run(s)", n)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Scheduler error: %s", exc)
+
+
+async def _reaper_loop() -> None:
+    while True:
+        await asyncio.sleep(30)
+        try:
+            n = await asyncio.to_thread(_reaper_tick)
+            if n:
+                logger.info("Reaper reclaimed %s stale run(s)", n)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("Reaper error: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Backup API starting (version v%s)", APP_VERSION)
+    scheduler_task = asyncio.create_task(_scheduler_loop())
+    reaper_task = asyncio.create_task(_reaper_loop())
+    yield
+    scheduler_task.cancel()
+    reaper_task.cancel()
+    await asyncio.gather(scheduler_task, reaper_task, return_exceptions=True)
+
+
 app = FastAPI(
     title="Backup Control Plane API",
     version=APP_VERSION,
+    lifespan=lifespan,
     docs_url="/docs" if settings.expose_docs else None,
     redoc_url="/redoc" if settings.expose_docs else None,
     openapi_url="/openapi.json" if settings.expose_docs else None,
 )
-
-
-@app.on_event("startup")
-async def log_startup_version() -> None:
-    logger.info("Backup API starting (version v%s)", APP_VERSION)
 
 app.add_middleware(
     CORSMiddleware,
@@ -101,9 +237,13 @@ async def auth_and_metrics(request: Request, call_next):
     return response
 
 
-def queue() -> Queue:
-    redis_conn = Redis.from_url(settings.redis_url)
-    return Queue("backup-runs", connection=redis_conn)
+def _record_status_change(db: Session, run: BackupRun, new_status: RunStatus, reason: str = "") -> None:
+    db.add(BackupRunStatusHistory(
+        backup_run_id=run.id,
+        old_status=run.status,
+        new_status=new_status,
+        reason=reason,
+    ))
 
 
 def _load_text_secret(secret_ref: str) -> str:
@@ -494,28 +634,13 @@ def _ensure_source_type_enabled(source_type: SourceType) -> None:
         )
 
 
-def _extract_job_id(message: str) -> str:
-    if not message or "Queued (job " not in message:
-        return ""
-    return message.removeprefix("Queued (job ").removesuffix(")")
-
-
-def _get_run_job_id(run: BackupRun) -> str:
-    return (run.queue_job_id or _extract_job_id(run.message) or "").strip()
-
-
-def _enqueue_run(run: BackupRun, q: Queue) -> BackupRun:
-    retry = Retry(max=max(settings.max_retries, 0), interval=[60, 300, 900]) if settings.max_retries > 0 else None
-    job = q.enqueue(
-        "tasks.run_backup_job",
-        run.id,
-        retry=retry,
-        job_timeout=settings.rq_job_timeout,
-    )
-    run.queue_job_id = job.id
-    run.message = f"Queued (job {job.id})"
-    run.max_attempts = max(settings.max_retries, 0) + 1
-    return run
+def _worker_online(worker: Worker) -> bool:
+    if worker.last_heartbeat_at is None:
+        return False
+    hb = worker.last_heartbeat_at
+    if hb.tzinfo is None:
+        hb = hb.replace(tzinfo=timezone.utc)
+    return (_utcnow() - hb).total_seconds() < settings.worker_heartbeat_timeout_seconds
 
 
 @app.get("/health")
@@ -571,6 +696,233 @@ def metrics() -> Any:
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
+# ---------------------------------------------------------------------------
+# Worker management
+# ---------------------------------------------------------------------------
+
+@app.post("/workers/register", response_model=WorkerRegisterResponse)
+def register_worker(payload: WorkerRegisterRequest, request: Request, db: Session = Depends(get_db)) -> WorkerRegisterResponse:
+    import hmac as _hmac
+    reg_token = settings.worker_registration_token
+    if not reg_token:
+        raise HTTPException(status_code=503, detail="worker registration is not configured (WORKER_REGISTRATION_TOKEN not set)")
+    provided = request.headers.get("X-Worker-Registration-Token", "")
+    if not provided or not _hmac.compare_digest(provided, reg_token):
+        raise HTTPException(status_code=401, detail="invalid registration token")
+
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="worker name cannot be empty")
+
+    worker = db.query(Worker).filter(Worker.name == name).one_or_none()
+    if worker is None:
+        worker = Worker(name=name, token_hash="", registered_at=_utcnow(), is_active=True)
+        db.add(worker)
+        db.flush()
+    else:
+        worker.is_active = True
+        worker.registered_at = _utcnow()
+
+    token = issue_worker_token(db, worker)
+    logger.info("Worker registered: name=%s id=%s", worker.name, worker.id)
+    return WorkerRegisterResponse(worker_id=worker.id, token=token, name=worker.name)
+
+
+@app.post("/workers/heartbeat")
+def worker_heartbeat(worker: Worker = Depends(require_worker), db: Session = Depends(get_db)) -> dict[str, bool]:
+    db_worker = db.get(Worker, worker.id)
+    if db_worker is None:
+        raise HTTPException(status_code=404, detail="worker not found")
+    db_worker.last_heartbeat_at = _utcnow()
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/workers", response_model=list[WorkerRead])
+def list_workers(db: Session = Depends(get_db)) -> list[WorkerRead]:
+    workers = db.query(Worker).order_by(Worker.id.asc()).all()
+    result = []
+    for w in workers:
+        wr = WorkerRead.model_validate(w)
+        wr.online = _worker_online(w)
+        result.append(wr)
+    return result
+
+
+@app.put("/workers/{worker_id}", response_model=WorkerRead)
+def update_worker(worker_id: int, payload: WorkerUpdate, db: Session = Depends(get_db)) -> WorkerRead:
+    worker = db.get(Worker, worker_id)
+    if worker is None:
+        raise HTTPException(status_code=404, detail="worker not found")
+    if payload.name is not None:
+        worker.name = payload.name.strip()
+    if payload.is_active is not None:
+        worker.is_active = payload.is_active
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="worker name already taken")
+    db.refresh(worker)
+    wr = WorkerRead.model_validate(worker)
+    wr.online = _worker_online(worker)
+    return wr
+
+
+@app.delete("/workers/{worker_id}")
+def delete_worker(worker_id: int, db: Session = Depends(get_db)) -> dict[str, bool]:
+    worker = db.get(Worker, worker_id)
+    if worker is None:
+        raise HTTPException(status_code=404, detail="worker not found")
+    db.delete(worker)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="worker is referenced by one or more sources")
+    return {"ok": True}
+
+
+@app.post("/workers/runs/claim")
+def claim_run(worker: Worker = Depends(require_worker), db: Session = Depends(get_db)) -> Any:
+    """Atomically claim the oldest queued run whose source is pinned to this worker."""
+    from .database import engine as _engine
+    dialect = _engine.dialect.name if _engine is not None else "sqlite"
+
+    source_ids = [
+        s.id for s in db.query(Source.id).filter(
+            Source.worker_id == worker.id,
+            Source.is_active.is_(True),
+        ).all()
+    ]
+    if not source_ids:
+        return Response(status_code=204)
+
+    binding_ids = [
+        b.id for b in db.query(Binding.id).filter(
+            Binding.source_id.in_(source_ids),
+            Binding.is_active.is_(True),
+        ).all()
+    ]
+    if not binding_ids:
+        return Response(status_code=204)
+
+    now = _utcnow()
+    if dialect == "postgresql":
+        run = (
+            db.query(BackupRun)
+            .filter(BackupRun.status == RunStatus.queued)
+            .filter(BackupRun.binding_id.in_(binding_ids))
+            .order_by(BackupRun.id.asc())
+            .limit(1)
+            .with_for_update(skip_locked=True)
+            .one_or_none()
+        )
+    else:
+        run = (
+            db.query(BackupRun)
+            .filter(BackupRun.status == RunStatus.queued)
+            .filter(BackupRun.binding_id.in_(binding_ids))
+            .order_by(BackupRun.id.asc())
+            .first()
+        )
+
+    if run is None:
+        return Response(status_code=204)
+
+    run.status = RunStatus.running
+    run.worker_id = worker.id
+    run.claimed_at = now
+    run.last_heartbeat_at = now
+    run.attempts = int(run.attempts or 0) + 1
+    run.message = f"Claimed by worker {worker.name}"
+    _record_status_change(db, run, RunStatus.running, f"Claimed by worker {worker.name} (attempt {run.attempts})")
+    db.commit()
+    db.refresh(run)
+
+    binding = db.get(Binding, run.binding_id)
+    source = db.get(Source, binding.source_id)
+    destination = db.get(Destination, binding.destination_id)
+
+    return ClaimedRunContext(
+        run_id=run.id,
+        binding_id=run.binding_id,
+        source_type=source.source_type.value,
+        source_settings=source.settings or {},
+        destination=DestinationInfo(
+            endpoint=destination.endpoint,
+            bucket=destination.bucket,
+            region=destination.region,
+            secret_ref=destination.secret_ref or "",
+            encryption=destination.encryption or {},
+        ),
+        binding=BindingInfo(
+            id=binding.id,
+            policy=binding.policy or {},
+        ),
+    )
+
+
+@app.post("/workers/runs/{run_id}/status", response_model=RunStatusUpdateResponse)
+def update_run_status(
+    run_id: int,
+    payload: RunStatusUpdate,
+    worker: Worker = Depends(require_worker),
+    db: Session = Depends(get_db),
+) -> RunStatusUpdateResponse:
+    run = db.get(BackupRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+    if run.worker_id != worker.id:
+        raise HTTPException(status_code=403, detail="run not owned by this worker")
+
+    run.last_heartbeat_at = _utcnow()
+
+    if payload.status == RunStatus.running:
+        run.message = payload.message or run.message
+        if payload.bytes_transferred:
+            run.bytes_transferred = payload.bytes_transferred
+        db.commit()
+        return RunStatusUpdateResponse(ok=True, cancel_requested=bool(run.cancel_requested))
+
+    if payload.status == RunStatus.success:
+        _record_status_change(db, run, RunStatus.success, payload.message or "Backup completed")
+        run.status = RunStatus.success
+        run.bytes_transferred = payload.bytes_transferred
+        run.artifact_ref = payload.artifact_ref
+        run.finished_at = _utcnow()
+        run.message = payload.message or "Completed"
+        db.commit()
+        return RunStatusUpdateResponse(ok=True, cancel_requested=False)
+
+    if payload.status == RunStatus.cancelled:
+        _record_status_change(db, run, RunStatus.cancelled, payload.message or "Cancelled by worker")
+        run.status = RunStatus.cancelled
+        run.finished_at = _utcnow()
+        run.message = payload.message or "Cancelled"
+        db.commit()
+        return RunStatusUpdateResponse(ok=True, cancel_requested=False)
+
+    if payload.status == RunStatus.failed:
+        retryable = payload.retryable and int(run.attempts or 0) < int(run.max_attempts or 1)
+        if retryable:
+            _record_status_change(db, run, RunStatus.queued, f"Retrying: {payload.message}")
+            run.status = RunStatus.queued
+            run.worker_id = None
+            run.claimed_at = None
+            run.last_heartbeat_at = None
+            run.message = f"Retrying (attempt {run.attempts}/{run.max_attempts}): {payload.message}"
+        else:
+            _record_status_change(db, run, RunStatus.failed, payload.message or "Backup failed")
+            run.status = RunStatus.failed
+            run.finished_at = _utcnow()
+            run.message = payload.message or "Failed"
+        db.commit()
+        return RunStatusUpdateResponse(ok=True, cancel_requested=False)
+
+    raise HTTPException(status_code=400, detail=f"unexpected status value: {payload.status}")
+
+
 @app.post("/destinations", response_model=DestinationRead)
 def create_destination(payload: DestinationCreate, db: Session = Depends(get_db)) -> Destination:
     item = Destination(**payload.destination_kwargs())
@@ -618,6 +970,13 @@ def delete_destination(destination_id: int, db: Session = Depends(get_db)) -> di
 @app.post("/sources", response_model=SourceRead)
 def create_source(payload: SourceCreate, db: Session = Depends(get_db)) -> Source:
     _ensure_source_type_enabled(payload.source_type)
+    if payload.worker_id is None:
+        raise HTTPException(status_code=400, detail="worker_id is required when creating a source")
+    worker = db.get(Worker, payload.worker_id)
+    if worker is None:
+        raise HTTPException(status_code=404, detail="worker not found")
+    if not worker.is_active:
+        raise HTTPException(status_code=400, detail="worker is not active")
     item = Source(**payload.model_dump())
     db.add(item)
     db.commit()
@@ -633,6 +992,13 @@ def list_sources(db: Session = Depends(get_db)) -> list[Source]:
 @app.put("/sources/{source_id}", response_model=SourceRead)
 def update_source(source_id: int, payload: SourceCreate, db: Session = Depends(get_db)) -> Source:
     _ensure_source_type_enabled(payload.source_type)
+    if payload.worker_id is None:
+        raise HTTPException(status_code=400, detail="worker_id is required when updating a source")
+    worker = db.get(Worker, payload.worker_id)
+    if worker is None:
+        raise HTTPException(status_code=404, detail="worker not found")
+    if not worker.is_active:
+        raise HTTPException(status_code=400, detail="worker is not active")
     item = db.get(Source, source_id)
     if item is None:
         raise HTTPException(status_code=404, detail="source not found")
@@ -837,63 +1203,26 @@ def trigger_run(binding_id: int, db: Session = Depends(get_db)) -> BackupRun:
     db.add(run)
     db.commit()
     db.refresh(run)
-
-    run = _enqueue_run(run, queue())
-    db.commit()
-    db.refresh(run)
     return run
 
 
-def _cancel_run(run: BackupRun, q: Queue, db: Session) -> tuple[bool, str]:
+def _cancel_run(run: BackupRun, db: Session) -> tuple[bool, str]:
     if run.status.value not in {"queued", "running"}:
         return False, f"run is {run.status.value}"
 
-    job_id = _get_run_job_id(run)
-
-    if not job_id:
-        if run.status.value == "queued":
-            run.status = RunStatus.failed
-            run.finished_at = datetime.now(timezone.utc)
-            run.message = "Failed: stale queued job (missing RQ job id)"
-            db.commit()
-            return False, "stale queued job"
-
+    if run.status == RunStatus.queued:
+        _record_status_change(db, run, RunStatus.cancelled, "Cancelled by admin")
         run.status = RunStatus.cancelled
-        run.finished_at = datetime.now(timezone.utc)
-        run.message = "Cancelled: stale running job (missing RQ job id)"
-        db.commit()
-        return True, "cancelled"
-
-    try:
-        job = Job.fetch(job_id, connection=q.connection)
-    except Exception:
-        if run.status.value == "queued":
-            return False, "queue job no longer exists"
-        run.status = RunStatus.cancelled
-        run.finished_at = datetime.now(timezone.utc)
-        run.message = "Cancellation requested (worker is already running)"
-        db.commit()
-        return True, "cancellation requested"
-
-    status = job.get_status(refresh=True)
-
-    if status in {"queued", "deferred", "scheduled"}:
-        job.cancel()
-        run.status = RunStatus.cancelled
-        run.finished_at = datetime.now(timezone.utc)
+        run.finished_at = _utcnow()
         run.message = "Cancelled before execution"
         db.commit()
         return True, "cancelled"
 
-    if status in {"started", "busy"}:
-        send_stop_job_command(q.connection, job_id)
-        run.status = RunStatus.cancelled
-        run.finished_at = datetime.now(timezone.utc)
-        run.message = "Cancellation requested"
-        db.commit()
-        return True, "cancellation requested"
-
-    return False, f"job already {status}"
+    # running: signal the worker cooperatively
+    run.cancel_requested = True
+    run.message = "Cancellation requested"
+    db.commit()
+    return True, "cancellation requested"
 
 
 @app.post("/runs/cancel")
@@ -901,7 +1230,6 @@ def cancel_runs(payload: RunCancelRequest, db: Session = Depends(get_db)) -> dic
     if not payload.run_ids:
         raise HTTPException(status_code=400, detail="run_ids cannot be empty")
 
-    q = queue()
     cancelled: list[dict[str, Any]] = []
     not_cancelled: list[dict[str, Any]] = []
 
@@ -911,7 +1239,7 @@ def cancel_runs(payload: RunCancelRequest, db: Session = Depends(get_db)) -> dic
             not_cancelled.append({"run_id": run_id, "reason": "run not found"})
             continue
 
-        ok, reason = _cancel_run(run, q, db)
+        ok, reason = _cancel_run(run, db)
         if ok:
             cancelled.append({"run_id": run_id, "result": reason})
         else:
@@ -926,7 +1254,7 @@ def cancel_single_run(run_id: int, db: Session = Depends(get_db)) -> dict[str, A
     if run is None:
         raise HTTPException(status_code=404, detail="run not found")
 
-    ok, reason = _cancel_run(run, queue(), db)
+    ok, reason = _cancel_run(run, db)
     if not ok:
         raise HTTPException(status_code=409, detail=reason)
     return {"ok": True, "result": reason}
@@ -954,6 +1282,7 @@ def read_run(run_id: int, db: Session = Depends(get_db)) -> dict[str, Any]:
         "attempts": run.attempts,
         "max_attempts": run.max_attempts,
         "artifact_ref": run.artifact_ref,
+        "worker_id": run.worker_id,
     }
 
 
@@ -974,10 +1303,13 @@ def topology(db: Session = Depends(get_db)) -> dict[str, Any]:
     destinations = db.query(Destination).all()
     bindings = db.query(Binding).all()
 
+    workers = {w.id: w for w in db.query(Worker).all()}
+
     nodes = []
     edges = []
 
     for s in sources:
+        worker_name = workers[s.worker_id].name if s.worker_id and s.worker_id in workers else None
         nodes.append(
             {
                 "id": f"source-{s.id}",
@@ -985,6 +1317,8 @@ def topology(db: Session = Depends(get_db)) -> dict[str, Any]:
                 "kind": "source",
                 "type": s.source_type.value,
                 "active": s.is_active,
+                "worker_id": s.worker_id,
+                "worker_name": worker_name,
             }
         )
 

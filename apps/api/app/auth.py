@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .database import SessionLocal
-from .models import User, UserSession
+from .models import User, UserSession, Worker
 
 ADMIN_USERNAME = "admin"
 PBKDF2_ITERATIONS = 390_000
@@ -80,6 +80,29 @@ def get_user_from_token(db: Session, token: str) -> User | None:
     return db.get(User, session_row.user_id)
 
 
+def get_worker_from_token(db: Session, token: str) -> Worker | None:
+    if not token:
+        return None
+    worker = db.query(Worker).filter(Worker.token_hash == _hash_token(token)).one_or_none()
+    if worker is None or not worker.is_active:
+        return None
+    return worker
+
+
+def issue_worker_token(db: Session, worker: Worker) -> str:
+    token = secrets.token_urlsafe(32)
+    worker.token_hash = _hash_token(token)
+    db.commit()
+    return token
+
+
+def require_worker(request: Request) -> Worker:
+    worker = getattr(request.state, "worker", None)
+    if worker is None:
+        raise HTTPException(status_code=403, detail="worker authentication required")
+    return worker
+
+
 def _bearer_token(request: Request) -> str:
     header = request.headers.get("Authorization", "")
     if header.startswith("Bearer "):
@@ -102,6 +125,8 @@ def enforce_api_key(request: Request) -> HTTPException | None:
         return None
     if path == "/auth/login":
         return None
+    if path == "/workers/register":
+        return None
 
     keys = configured_api_keys()
     if keys:
@@ -114,10 +139,14 @@ def enforce_api_key(request: Request) -> HTTPException | None:
         db = SessionLocal()
         try:
             user = get_user_from_token(db, session_token)
+            if user is not None:
+                request.state.user = user
+                return None
+            worker = get_worker_from_token(db, session_token)
+            if worker is not None:
+                request.state.worker = worker
+                return None
         finally:
             db.close()
-        if user is not None:
-            request.state.user = user
-            return None
 
     return HTTPException(status_code=401, detail="authentication required", headers={"WWW-Authenticate": "Bearer"})

@@ -2,7 +2,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -24,6 +24,17 @@ class RunStatus(str, enum.Enum):
     success = "success"
     failed = "failed"
     cancelled = "cancelled"
+
+
+class Worker(Base):
+    __tablename__ = "workers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class Destination(Base):
@@ -48,6 +59,7 @@ class Source(Base):
     source_type: Mapped[SourceType] = mapped_column(Enum(SourceType), nullable=False)
     settings: Mapped[dict] = mapped_column(JSON, default=dict)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    worker_id: Mapped[int | None] = mapped_column(ForeignKey("workers.id"), nullable=True, index=True)
 
 
 class Binding(Base):
@@ -76,6 +88,10 @@ class BackupRun(Base):
     artifact_ref: Mapped[str] = mapped_column(String(255), default="")
     queue_job_id: Mapped[str] = mapped_column(String(64), default="", index=True)
     message: Mapped[str] = mapped_column(Text, default="")
+    worker_id: Mapped[int | None] = mapped_column(ForeignKey("workers.id"), nullable=True, index=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class BackupRunStatusHistory(Base):

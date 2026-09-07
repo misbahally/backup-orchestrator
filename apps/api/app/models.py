@@ -9,6 +9,7 @@ from orchestrator_core.models import (
     SourceType,
     User,
     UserSession,
+    Worker,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "SourceType",
     "User",
     "UserSession",
+    "Worker",
 ]

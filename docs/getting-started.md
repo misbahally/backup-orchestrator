@@ -19,13 +19,13 @@ cp .env.example .env
 If you are using the defaults in the compose file, the stack will start with:
 
 - PostgreSQL on port 5432
-- Redis on port 6379
 - MinIO on ports 9000 and 9001
 - API on port 8001
 - Web UI on port 8080
 
 Set these important variables in `.env` before startup:
 
+- `WORKER_REGISTRATION_TOKEN` — **required**; shared secret that workers present when registering with the API
 - `API_KEYS` (recommended in any non-local environment)
 - `FILE_SOURCE_ALLOWED_ROOTS` (paths that file sources are allowed to back up)
 
@@ -44,7 +44,8 @@ cd ../worker && poetry env use 3.13 && poetry install --no-root
 docker compose up --build
 ```
 
-The `migrate` one-shot service runs `alembic upgrade head` before API/worker/scheduler start.
+The `migrate` one-shot service runs `alembic upgrade head` before the API starts. Once the
+API is healthy, the `worker` service registers itself and begins polling for runs.
 
 After the services are running, open:
 
@@ -84,16 +85,22 @@ aws --endpoint-url http://localhost:9000 s3 cp /tmp/minio-test.txt s3://backups/
 
 The workflow is:
 
-1. Create a source
-2. Create a destination
-3. Create a binding between them
-4. Trigger a backup run
+1. Register a worker (happens automatically when the worker container starts)
+2. Create a source and assign it to the worker
+3. Create a destination
+4. Create a binding between them
+5. Trigger a backup run
+
+You can manage workers from the **Workers** tab in the Configuration Hub. A source must be
+pinned to an active worker before the scheduler will queue runs for it.
 
 The API endpoints for this workflow are documented in [API usage](./api-usage.md).
 
 ## 6. Monitor backup runs
 
-You can inspect runs through the API or the web UI. The worker will update run status from queued to running to success or failed.
+You can inspect runs through the API or the web UI. The worker will update run status
+from `queued` → `running` → `success` or `failed`. A run stays in `queued` until the
+worker it is pinned to connects and claims it.
 
 Useful endpoints:
 
