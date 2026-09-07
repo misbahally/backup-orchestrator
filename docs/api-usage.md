@@ -83,10 +83,6 @@ claim and execute any runs triggered for bindings that reference this source.
 To find the ID of a registered worker:
 
 ```bash
-curl -H 'X-API-Key: dev-key' http://localhost:8000/workers
-```
-
-```bash
 curl -X POST http://localhost:8001/sources \
   -H 'Content-Type: application/json' \
   -H 'X-API-Key: dev-key' \
