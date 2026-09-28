@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -13,13 +14,74 @@ from metrics import (
     BACKUP_UPLOADED_BYTES_TOTAL,
 )
 from models import Binding, Destination, Source, SourceType
-from plugins import run_database_dump_to_s3, run_ebs_snapshot, run_file_to_s3, run_rds_snapshot, run_s3_to_s3
+from plugins import (
+    RunCancelled,
+    run_database_dump_to_s3,
+    run_ebs_snapshot,
+    run_file_to_s3,
+    run_rds_snapshot,
+    run_s3_to_s3,
+)
 
 if TYPE_CHECKING:
     from api_client import WorkerApiClient
 
 logger = logging.getLogger("backup-worker")
 TEMP_DISABLED_SOURCE_TYPES = {SourceType.ebs, SourceType.rds}
+
+
+def _format_bytes(num: int) -> str:
+    value = float(num)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if value < 1024 or unit == "TiB":
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{num} B"
+
+
+class _RunHeartbeat(threading.Thread):
+    """Keeps the worker and run heartbeats fresh, reports progress, and relays cancel requests."""
+
+    def __init__(self, client: "WorkerApiClient", run_id: int, source_type: str, progress: dict[str, int]) -> None:
+        super().__init__(name=f"run-{run_id}-heartbeat", daemon=True)
+        self.client = client
+        self.run_id = run_id
+        self.source_type = source_type
+        self.progress = progress
+        self.interval = max(5, int(os.environ.get("RUN_HEARTBEAT_INTERVAL", "30")))
+        self.started = time.monotonic()
+        self.stop_event = threading.Event()
+        self.cancel_event = threading.Event()
+
+    def message(self) -> str:
+        elapsed = int(time.monotonic() - self.started)
+        p = dict(self.progress)
+        if not p:
+            return f"Running {self.source_type} backup ({elapsed}s elapsed)"
+        return (
+            f"Running: scanned={p.get('scanned_objects', 0)}, copied={p.get('copied_objects', 0)}, "
+            f"skipped={p.get('skipped_objects', 0)}, transferred={_format_bytes(p.get('transferred_bytes', 0))}, "
+            f"elapsed={elapsed}s"
+        )
+
+    def run(self) -> None:
+        while not self.stop_event.wait(self.interval):
+            message = self.message()
+            logger.info("Run %s progress: %s", self.run_id, message)
+            self.client.heartbeat()
+            resp = self.client.report_status(
+                self.run_id,
+                "running",
+                message,
+                bytes_transferred=int(self.progress.get("transferred_bytes", 0)),
+            )
+            if resp.get("cancel_requested") and not self.cancel_event.is_set():
+                logger.info("Run %s: cancel requested", self.run_id)
+                self.cancel_event.set()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        self.join(timeout=30)
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -40,6 +102,7 @@ def run_backup_job(context: dict, client: "WorkerApiClient") -> None:
     source_type_name: str = context.get("source_type", "unknown")
     binding_id = str(context.get("binding_id", ""))
     started = time.perf_counter()
+    heartbeat: _RunHeartbeat | None = None
 
     try:
         source = Source(
@@ -74,8 +137,12 @@ def run_backup_job(context: dict, client: "WorkerApiClient") -> None:
         skipped = 0
         artifact_ref = ""
 
+        progress: dict[str, int] = {}
+        heartbeat = _RunHeartbeat(client, run_id, source_type_name, progress)
+        heartbeat.start()
+
         if source.source_type == SourceType.s3:
-            summary = run_s3_to_s3(source, destination, binding)
+            summary = run_s3_to_s3(source, destination, binding, progress=progress, cancel_event=heartbeat.cancel_event)
             transferred = int(summary.get("transferred_bytes", 0))
             copied = int(summary.get("copied_objects", 0))
             skipped = int(summary.get("skipped_objects", 0))
@@ -101,6 +168,7 @@ def run_backup_job(context: dict, client: "WorkerApiClient") -> None:
         else:
             raise NotImplementedError(f"Source type '{source.source_type.value}' is not implemented yet")
 
+        heartbeat.stop()
         finish_message = (
             f"Completed snapshot: {artifact_ref}" if artifact_ref
             else f"Completed: copied={copied}, skipped={skipped}"
@@ -116,7 +184,15 @@ def run_backup_job(context: dict, client: "WorkerApiClient") -> None:
         BACKUP_UPLOADED_BYTES_TOTAL.labels(binding=binding_id).inc(transferred)
         BACKUP_LAST_SUCCESS_TIMESTAMP.labels(binding=binding_id).set(time.time())
 
+    except RunCancelled as exc:
+        if heartbeat is not None:
+            heartbeat.stop()
+        client.report_status(run_id, "cancelled", f"{exc}; progress: {heartbeat.message() if heartbeat else ''}")
+        BACKUP_OPERATIONS_TOTAL.labels(source_type=source_type_name, status="cancelled").inc()
+        logger.info("Backup run %s cancelled", run_id)
     except Exception as exc:
+        if heartbeat is not None:
+            heartbeat.stop()
         retryable = _is_retryable(exc)
         client.report_status(
             run_id, "failed",

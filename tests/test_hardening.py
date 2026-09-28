@@ -499,3 +499,96 @@ def test_database_dump_plugin_uploads_dump_to_destination(monkeypatch):
     assert uploaded["bucket"] == "backups"
     assert uploaded["key"].endswith("mysql-app.sql")
     assert calls[0][0].endswith("mysqldump")
+
+
+class _FakeListingS3:
+    """Minimal S3 fake: paginated sorted listing, get/upload, delete."""
+
+    def __init__(self, objects: dict[str, int], page_size: int = 2, unsorted: bool = False):
+        self.objects = dict(objects)
+        self.page_size = page_size
+        self.unsorted = unsorted
+        self.uploaded: list[str] = []
+        self.deleted: list[str] = []
+
+    def get_paginator(self, name):
+        fake = self
+
+        class Paginator:
+            def paginate(self, Bucket, Prefix):
+                keys = [k for k in fake.objects if k.startswith(Prefix)]
+                keys = list(reversed(sorted(keys))) if fake.unsorted else sorted(keys)
+                for i in range(0, len(keys), fake.page_size):
+                    yield {"Contents": [{"Key": k, "Size": fake.objects[k]} for k in keys[i:i + fake.page_size]]}
+
+        return Paginator()
+
+    def get_object(self, Bucket, Key):
+        class Body:
+            def close(self):
+                pass
+
+        return {"Body": Body()}
+
+    def upload_fileobj(self, body, bucket, key, **kwargs):
+        self.uploaded.append(key)
+
+    def delete_objects(self, Bucket, Delete):
+        self.deleted.extend(o["Key"] for o in Delete["Objects"])
+
+
+def _run_fake_s3_sync(monkeypatch, src, dst, policy, **kwargs):
+    import plugins.s3_to_s3 as s3_to_s3
+
+    clients = iter([src, dst])
+    monkeypatch.setattr(s3_to_s3, "_make_s3_client", lambda region, endpoint, creds: next(clients))
+    monkeypatch.setattr(s3_to_s3, "_load_secret", lambda ref: {})
+    source = SimpleNamespace(settings={"bucket": "src", "prefix": "data"})
+    destination = SimpleNamespace(region="us-east-1", endpoint="", bucket="dst", secret_ref="", encryption={})
+    binding = SimpleNamespace(policy=policy)
+    return s3_to_s3.run_s3_to_s3(source, destination, binding, **kwargs)
+
+
+def test_s3_sync_streams_merge_copies_skips_and_deletes(monkeypatch):
+    src = _FakeListingS3({"data/a": 1, "data/b": 2, "data/c": 3, "data/e": 5, "other/x": 9})
+    dst = _FakeListingS3({"bk/a": 1, "bk/b": 99, "bk/d": 4, "bk/e": 5})
+    progress: dict[str, int] = {}
+
+    summary = _run_fake_s3_sync(
+        monkeypatch, src, dst, {"dest_prefix": "bk", "size_only": True, "delete": True}, progress=progress
+    )
+
+    assert sorted(dst.uploaded) == ["bk/b", "bk/c"]
+    assert dst.deleted == ["bk/d"]
+    assert summary == {
+        "scanned_objects": 4,
+        "copied_objects": 2,
+        "skipped_objects": 2,
+        "deleted_objects": 1,
+        "transferred_bytes": 5,
+    }
+    assert progress["copied_objects"] == 2
+
+
+def test_s3_sync_rejects_unsorted_listing_without_deleting(monkeypatch):
+    src = _FakeListingS3({"data/a": 1, "data/b": 1, "data/c": 1}, unsorted=True)
+    dst = _FakeListingS3({"bk/a": 1})
+
+    with pytest.raises(ValueError, match="lexicographic order"):
+        _run_fake_s3_sync(monkeypatch, src, dst, {"dest_prefix": "bk", "delete": True})
+
+    assert dst.deleted == []
+
+
+def test_s3_sync_honours_cancel_event(monkeypatch):
+    import threading
+    from plugins import RunCancelled
+
+    src = _FakeListingS3({"data/a": 1})
+    dst = _FakeListingS3({})
+    cancel = threading.Event()
+    cancel.set()
+
+    with pytest.raises(RunCancelled):
+        _run_fake_s3_sync(monkeypatch, src, dst, {}, cancel_event=cancel)
+    assert dst.uploaded == []

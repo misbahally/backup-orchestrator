@@ -2,11 +2,14 @@ import base64
 import gzip
 import hashlib
 import json
+import logging
 import mimetypes
 import os
 import re
 import tempfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+from collections.abc import Iterable, Iterator
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from datetime import datetime
 from typing import Any
 
@@ -15,6 +18,12 @@ from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
 
 from secret_resolver import resolve_secret_mapping, resolve_secret_text
+
+logger = logging.getLogger("backup-worker")
+
+
+class RunCancelled(Exception):
+    pass
 
 
 def _load_secret(secret_ref: str) -> dict[str, str]:
@@ -150,6 +159,9 @@ def _make_s3_client(region: str, endpoint: str, creds: dict[str, str]) -> Any:
     kwargs["config"] = Config(
         retries={"mode": "adaptive", "max_attempts": 10},
         max_pool_connections=64,
+        connect_timeout=10,
+        read_timeout=60,
+        tcp_keepalive=True,
     )
 
     return boto3.client(**kwargs)
@@ -163,20 +175,54 @@ def _dest_key_for(source_key: str, source_prefix: str, dest_prefix: str) -> str:
     return "/".join(part for part in (dest_prefix, rel) if part)
 
 
-def _list_objects(
-    s3_client: Any,
-    bucket: str,
-    prefix: str,
-) -> dict[str, dict[str, Any]]:
+def _iter_objects(s3_client: Any, bucket: str, prefix: str) -> Iterator[tuple[str, dict[str, Any]]]:
     paginator = s3_client.get_paginator("list_objects_v2")
-    objects: dict[str, dict[str, Any]] = {}
     for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
         for obj in page.get("Contents", []):
-            objects[obj["Key"]] = {
+            yield obj["Key"], {
                 "size": int(obj.get("Size", 0)),
                 "last_modified": obj.get("LastModified"),
             }
-    return objects
+
+
+def _ensure_ordered(items: Iterable[tuple[str, Any]], label: str) -> Iterator[tuple[str, Any]]:
+    # Python str ordering (code points) matches S3's UTF-8 binary key ordering.
+    previous: str | None = None
+    for item in items:
+        key = item[0]
+        if previous is not None and key <= previous:
+            raise ValueError(
+                f"{label} listing is not in lexicographic order ({previous!r} then {key!r}); "
+                "streaming S3 sync requires sorted listings"
+            )
+        previous = key
+        yield item
+
+
+def _merge_listings(
+    source_items: Iterable[tuple[str, str, dict[str, Any]]],
+    destination_items: Iterable[tuple[str, dict[str, Any]]],
+) -> Iterator[tuple[str, str | None, dict[str, Any] | None, dict[str, Any] | None]]:
+    """Merge-join sorted (target_key, source_key, meta) and (dest_key, meta) streams.
+
+    Yields (target_key, source_key, source_meta, destination_meta); source fields are None
+    for destination-only keys and destination_meta is None for source-only keys.
+    """
+    src_iter = iter(_ensure_ordered(source_items, "Source"))
+    dst_iter = iter(_ensure_ordered(destination_items, "Destination"))
+    src = next(src_iter, None)
+    dst = next(dst_iter, None)
+    while src is not None or dst is not None:
+        if dst is None or (src is not None and src[0] < dst[0]):
+            yield src[0], src[1], src[2], None
+            src = next(src_iter, None)
+        elif src is None or dst[0] < src[0]:
+            yield dst[0], None, None, dst[1]
+            dst = next(dst_iter, None)
+        else:
+            yield src[0], src[1], src[2], dst[1]
+            src = next(src_iter, None)
+            dst = next(dst_iter, None)
 
 
 def _int_policy(policy: dict[str, Any], key: str, default: int, *, minimum: int, maximum: int) -> int:
@@ -492,14 +538,26 @@ def _should_copy(
     return source_last_modified > destination_last_modified
 
 
-def run_s3_to_s3(source: Any, destination: Any, binding: Any) -> dict[str, int]:
-    """Copy objects from source S3 bucket to destination S3-compatible bucket."""
+def run_s3_to_s3(
+    source: Any,
+    destination: Any,
+    binding: Any,
+    progress: dict[str, int] | None = None,
+    cancel_event: threading.Event | None = None,
+) -> dict[str, int]:
+    """Copy objects from source S3 bucket to destination S3-compatible bucket.
+
+    ``progress`` is updated in place so another thread can report it while the sync runs.
+    """
     source_settings = source.settings or {}
     policy = binding.policy or {}
 
     source_bucket = source_settings.get("bucket", "").strip()
     if not source_bucket:
         raise ValueError("S3 source requires settings.bucket")
+    for bucket_name in (source_bucket, destination.bucket or ""):
+        if bucket_name.endswith("--x-s3"):
+            raise ValueError(f"S3 directory buckets are not supported (unsorted listings): {bucket_name}")
 
     source_prefix = str(source_settings.get("prefix", "")).strip().strip("/")
     dest_prefix = str(policy.get("dest_prefix", "")).strip().strip("/")
@@ -544,25 +602,72 @@ def run_s3_to_s3(source: Any, destination: Any, binding: Any) -> dict[str, int]:
         use_threads=use_transfer_threads,
     )
 
-    scanned = 0
-    copied = 0
-    skipped = 0
-    deleted = 0
-    transferred_bytes = 0
+    stats = progress if progress is not None else {}
+    stats.update(
+        scanned_objects=0,
+        copied_objects=0,
+        skipped_objects=0,
+        deleted_objects=0,
+        transferred_bytes=0,
+    )
 
-    source_objects = _list_objects(src, source_bucket, src_prefix_for_list)
-    destination_objects = _list_objects(dst, destination.bucket, dst_prefix_for_list)
+    source_stream = (
+        (_dest_key_for(key, source_prefix, dest_prefix), key, meta)
+        for key, meta in _iter_objects(src, source_bucket, src_prefix_for_list)
+    )
+    destination_stream = _iter_objects(dst, destination.bucket, dst_prefix_for_list)
 
-    source_to_destination_keys: dict[str, str] = {}
-    tasks: list[tuple[str, dict[str, Any]]] = []
-    for source_key, source_meta in source_objects.items():
-        source_to_destination_keys[source_key] = _dest_key_for(source_key, source_prefix, dest_prefix)
-        tasks.append((source_key, source_meta))
-        scanned += 1
+    # Bounded so listing never races far ahead of copying.
+    max_in_flight = parallel_workers * 4
+    in_flight: dict[Future, str] = {}
+    # Deferred until listing completes so an ordering violation can never cause a wrong delete.
+    delete_candidates: list[str] = []
 
-    with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
-        futures = [
-            executor.submit(
+    def collect(done: Iterable[Future]) -> None:
+        for future in done:
+            source_key = in_flight.pop(future)
+            try:
+                result = future.result()
+            except Exception:
+                logger.error("Failed to copy s3://%s/%s", source_bucket, source_key)
+                raise
+            stats["copied_objects"] += int(result.get("copied", 0))
+            stats["skipped_objects"] += int(result.get("skipped", 0))
+            stats["transferred_bytes"] += int(result.get("transferred_bytes", 0))
+
+    logger.info(
+        "S3 sync start: s3://%s/%s -> s3://%s/%s (workers=%s)",
+        source_bucket, src_prefix_for_list, destination.bucket, dst_prefix_for_list, parallel_workers,
+    )
+
+    executor = ThreadPoolExecutor(max_workers=parallel_workers)
+    try:
+        for target_key, source_key, source_meta, destination_meta in _merge_listings(source_stream, destination_stream):
+            if cancel_event is not None and cancel_event.is_set():
+                raise RunCancelled("Cancelled during S3 sync")
+
+            if source_key is None or source_meta is None:
+                if delete_extraneous:
+                    delete_candidates.append(target_key)
+                continue
+
+            stats["scanned_objects"] += 1
+            size = int(source_meta.get("size", 0))
+            if not _should_compress(source_key, size, compression) and not _should_copy(
+                size,
+                source_meta.get("last_modified"),
+                destination_meta,
+                size_only=size_only,
+                exact_timestamps=exact_timestamps,
+            ):
+                stats["skipped_objects"] += 1
+                continue
+
+            if len(in_flight) >= max_in_flight:
+                done, _ = wait(in_flight, return_when=FIRST_COMPLETED)
+                collect(done)
+
+            future = executor.submit(
                 _copy_one_object,
                 source_key=source_key,
                 source_meta=source_meta,
@@ -576,39 +681,34 @@ def run_s3_to_s3(source: Any, destination: Any, binding: Any) -> dict[str, int]:
                 src_region=src_region,
                 src_creds=src_creds,
                 destination_bucket=destination.bucket,
-                destination_objects=destination_objects,
+                destination_objects={target_key: destination_meta} if destination_meta else {},
                 transfer_config=transfer_config,
                 size_only=size_only,
                 exact_timestamps=exact_timestamps,
                 compression=compression,
             )
-            for source_key, source_meta in tasks
-        ]
+            in_flight[future] = source_key
 
-        for future in as_completed(futures):
-            result = future.result()
-            copied += int(result.get("copied", 0))
-            skipped += int(result.get("skipped", 0))
-            transferred_bytes += int(result.get("transferred_bytes", 0))
+        if in_flight:
+            done, _ = wait(in_flight)
+            collect(done)
+    except BaseException:
+        executor.shutdown(wait=True, cancel_futures=True)
+        raise
+    executor.shutdown(wait=True)
 
-    if delete_extraneous:
-        expected_destination_keys = set(source_to_destination_keys.values())
-        delete_batch: list[dict[str, str]] = []
-        for target_key in destination_objects:
-            if target_key not in expected_destination_keys:
-                delete_batch.append({"Key": target_key})
-                if len(delete_batch) == 1000:
-                    dst.delete_objects(Bucket=destination.bucket, Delete={"Objects": delete_batch, "Quiet": True})
-                    deleted += len(delete_batch)
-                    delete_batch = []
-        if delete_batch:
-            dst.delete_objects(Bucket=destination.bucket, Delete={"Objects": delete_batch, "Quiet": True})
-            deleted += len(delete_batch)
+    for start in range(0, len(delete_candidates), 1000):
+        if cancel_event is not None and cancel_event.is_set():
+            raise RunCancelled("Cancelled during S3 sync delete phase")
+        batch = [{"Key": key} for key in delete_candidates[start:start + 1000]]
+        dst.delete_objects(Bucket=destination.bucket, Delete={"Objects": batch, "Quiet": True})
+        stats["deleted_objects"] += len(batch)
 
+    logger.info("S3 sync done: %s", stats)
     return {
-        "scanned_objects": scanned,
-        "copied_objects": copied,
-        "skipped_objects": skipped,
-        "deleted_objects": deleted,
-        "transferred_bytes": transferred_bytes,
+        "scanned_objects": stats["scanned_objects"],
+        "copied_objects": stats["copied_objects"],
+        "skipped_objects": stats["skipped_objects"],
+        "deleted_objects": stats["deleted_objects"],
+        "transferred_bytes": stats["transferred_bytes"],
     }
