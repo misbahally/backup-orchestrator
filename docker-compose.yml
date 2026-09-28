@@ -50,7 +50,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://backup:backup@postgres:5432/backup_control}
       API_HOST: ${API_HOST:-0.0.0.0}
-      API_PORT: ${API_PORT:-8000}
+      API_PORT: ${API_PORT:-8001}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
       API_KEYS: ${API_KEYS:-}
       EXPOSE_DOCS: ${EXPOSE_DOCS:-true}
@@ -62,10 +62,10 @@ services:
       WORKER_HEARTBEAT_TIMEOUT_SECONDS: ${WORKER_HEARTBEAT_TIMEOUT_SECONDS:-120}
       RUN_HEARTBEAT_TIMEOUT_SECONDS: ${RUN_HEARTBEAT_TIMEOUT_SECONDS:-3600}
     ports:
-      - "8000:8000"
+      - "8001:8001"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()\" || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=2).read()\" || exit 1"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -86,7 +86,7 @@ services:
     env_file:
       - .env
     environment:
-      API_URL: ${API_URL:-http://backup-orchestrator-api:8000}
+      API_URL: ${API_URL:-http://backup-orchestrator-api:8001}
       WORKER_REGISTRATION_TOKEN: ${WORKER_REGISTRATION_TOKEN:-}
       WORKER_NAME: ${WORKER_NAME:-worker-1}
       WORKER_POLL_INTERVAL: ${WORKER_POLL_INTERVAL:-10}
@@ -116,7 +116,7 @@ services:
   #   env_file:
   #     - .env
   #   environment:
-  #     API_URL: ${API_URL:-http://backup-orchestrator-api:8000}
+  #     API_URL: ${API_URL:-http://backup-orchestrator-api:8001}
   #     WORKER_REGISTRATION_TOKEN: ${WORKER_REGISTRATION_TOKEN:-}
   #     WORKER_NAME: worker-2
   #     FILE_SOURCE_ALLOWED_ROOTS: ${FILE_SOURCE_ALLOWED_ROOTS:-/data:/mnt/backups}
@@ -131,147 +131,6 @@ services:
   #   depends_on:
   #     backup-orchestrator-api:
   #       condition: service_healthy
-
-  web:
-    build:
-      context: .
-      dockerfile: ./apps/web/Dockerfile
-    ports:
-      - "8080:80"
-    depends_on:
-      - backup-orchestrator-api
-
-volumes:
-  pgdata:
-  minio_data:
-
-  minio:
-    image: minio/minio:latest
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-
-  migrate:
-    build:
-      context: .
-      dockerfile: ./apps/api/Dockerfile
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://backup:backup@postgres:5432/backup_control}
-    command: ["alembic", "-c", "/app/alembic.ini", "upgrade", "head"]
-    restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  backup-orchestrator-api:
-    build:
-      context: .
-      dockerfile: ./apps/api/Dockerfile
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://backup:backup@postgres:5432/backup_control}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      API_HOST: ${API_HOST:-0.0.0.0}
-      API_PORT: ${API_PORT:-8001}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
-      API_KEYS: ${API_KEYS:-}
-      EXPOSE_DOCS: ${EXPOSE_DOCS:-true}
-      MAX_RETRIES: ${MAX_RETRIES:-3}
-      RQ_JOB_TIMEOUT: ${RQ_JOB_TIMEOUT:-2h}
-      FILE_SOURCE_ALLOWED_ROOTS: ${FILE_SOURCE_ALLOWED_ROOTS:-/data:/mnt/backups}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    ports:
-      - "8001:8001"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=2).read()\" || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-    mem_limit: 512m
-    cpus: 1.0
-    volumes:
-      - ./data:/data:ro
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
-
-  worker:
-    build:
-      context: .
-      dockerfile: ./apps/worker/Dockerfile
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://backup:backup@postgres:5432/backup_control}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      MAX_RETRIES: ${MAX_RETRIES:-3}
-      RQ_JOB_TIMEOUT: ${RQ_JOB_TIMEOUT:-2h}
-      FILE_SOURCE_ALLOWED_ROOTS: ${FILE_SOURCE_ALLOWED_ROOTS:-/data:/mnt/backups}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      METRICS_PORT: ${WORKER_METRICS_PORT:-9090}
-    command: ["python", "worker_main.py"]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pgrep -f worker_main.py >/dev/null || exit 1"]
-      interval: 20s
-      timeout: 5s
-      retries: 5
-    mem_limit: 1024m
-    cpus: 2.0
-    volumes:
-      - ./data:/data:ro
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
-
-  scheduler:
-    build:
-      context: .
-      dockerfile: ./apps/worker/Dockerfile
-    env_file:
-      - .env
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg2://backup:backup@postgres:5432/backup_control}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      SCHEDULER_INTERVAL_SECONDS: ${SCHEDULER_INTERVAL_SECONDS:-60}
-      MAX_RETRIES: ${MAX_RETRIES:-3}
-      RQ_JOB_TIMEOUT: ${RQ_JOB_TIMEOUT:-2h}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      METRICS_PORT: ${SCHEDULER_METRICS_PORT:-9090}
-    command: ["python", "scheduler.py"]
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/scheduler.heartbeat || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-    mem_limit: 128m
-    cpus: 0.5
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
 
   web:
     build:

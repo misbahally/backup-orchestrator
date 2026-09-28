@@ -15,7 +15,7 @@ def _default_name() -> str:
 
 class WorkerApiClient:
     def __init__(self) -> None:
-        self.api_url = os.environ.get("API_URL", "http://backup-orchestrator-api:8000").rstrip("/")
+        self.api_url = os.environ.get("API_URL", "http://backup-orchestrator-api:8001").rstrip("/")
         self.registration_token = os.environ.get("WORKER_REGISTRATION_TOKEN", "")
         self.worker_name = (os.environ.get("WORKER_NAME") or "").strip() or _default_name()
         self.state_path = Path(os.environ.get("WORKER_STATE_PATH", "/tmp/worker_state.json"))
